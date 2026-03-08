@@ -26,7 +26,7 @@ jest.mock('@/queue/producers', () => ({
   enqueueCheckout: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('@/payments/stripeClient', () => ({
+jest.mock('@/payments/providers/stripe/stripeClient', () => ({
   getStripeClient: () => ({
     issuing: {
       cardholders: { create: jest.fn().mockResolvedValue({ id: 'ich_test' }) },
