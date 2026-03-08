@@ -7,6 +7,7 @@ import { getPaymentProvider } from '@/payments';
 import { markCardIssued, startCheckout } from '@/orchestrator/intentService';
 import { enqueueCheckout } from '@/queue/producers';
 import { getTelegramBot } from './telegramClient';
+import { getSignupSession, setSignupSession, clearSignupSession } from './sessionStore';
 
 export async function handleTelegramCallback(update: Update): Promise<void> {
   const cb = update.callback_query;
@@ -23,11 +24,37 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
   // Answer immediately to clear the loading spinner — must happen within 30s
   await bot.api.answerCallbackQuery(callbackQueryId).catch(() => {});
 
-  // Parse compact format: "approve:<intentId>" or "reject:<intentId>"
+  // Parse compact format: "<action>:<payload>"
   const colonIdx = data.indexOf(':');
   if (colonIdx === -1) return;
   const action = data.slice(0, colonIdx);
-  const intentId = data.slice(colonIdx + 1);
+  const payload = data.slice(colonIdx + 1);
+
+  // ── Agent linking confirmation callbacks ─────────────────────────────────────
+  if (action === 'link_confirm' || action === 'link_cancel') {
+    // payload is the chatId of the user who initiated /start
+    const signingChatId = Number(payload);
+    const session = await getSignupSession(signingChatId);
+
+    if (!session || session.step !== 'awaiting_confirmation') {
+      await editMessage(bot, chatId, messageId, '⚠️ Session expired or not found. Please start again with /start <code>.');
+      return;
+    }
+
+    if (action === 'link_cancel') {
+      await clearSignupSession(signingChatId);
+      await editMessage(bot, chatId, messageId, '❌ Linking cancelled. You can start again with /start <code>.');
+      return;
+    }
+
+    // link_confirm: advance session to awaiting_email
+    await setSignupSession(signingChatId, { ...session, step: 'awaiting_email' });
+    await editMessage(bot, chatId, messageId, `✅ Confirmed! What email address should we use for your account?`);
+    return;
+  }
+
+  // ── Purchase approval callbacks ───────────────────────────────────────────────
+  const intentId = payload;
 
   if (action !== 'approve' && action !== 'reject') return;
 

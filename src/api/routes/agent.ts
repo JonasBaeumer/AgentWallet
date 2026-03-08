@@ -9,7 +9,8 @@ import { getPaymentProvider } from '@/payments';
 import { prisma } from '@/db/client';
 import { sendApprovalRequest } from '@/telegram/notificationService';
 
-const PAIRING_CODE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const PAIRING_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const PAIRING_CODE_RENEWAL_COOLDOWN_MS = 5 * 60 * 1000; // min gap between renewals per agentId
 const PAIRING_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous O/0/I/1
 
 function generatePairingCode(): string {
@@ -194,6 +195,11 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
       if (existing.claimedByUserId) {
         return reply.status(409).send({ error: 'Agent already has a linked user — re-registration not needed' });
+      }
+      // Per-agentId rate limit: derive when the last code was issued from its expiry
+      const lastIssuedAt = existing.expiresAt.getTime() - PAIRING_CODE_TTL_MS;
+      if (Date.now() - lastIssuedAt < PAIRING_CODE_RENEWAL_COOLDOWN_MS) {
+        return reply.status(429).send({ error: 'Too many renewal requests for this agent — please wait before retrying' });
       }
       // Issue a fresh code
       const updated = await prisma.pairingCode.update({
