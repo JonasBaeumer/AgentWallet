@@ -142,13 +142,13 @@ model ApprovalDecision {
 
 model AuditEvent {
   id        String   @id @default(cuid())
-  intentId  String
+  intentId  String?
   actor     String
   event     String
   payload   Json     @default("{}")
   createdAt DateTime @default(now())
 
-  intent    PurchaseIntent @relation(fields: [intentId], references: [id])
+  intent    PurchaseIntent? @relation(fields: [intentId], references: [id])
 }
 
 model IdempotencyRecord {

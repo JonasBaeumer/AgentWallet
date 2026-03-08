@@ -4,7 +4,7 @@ const KEY_PREFIX = 'telegram_signup:';
 const DEFAULT_TTL_SECONDS = 600; // 10 minutes
 
 export interface SignupSession {
-  step: 'awaiting_email';
+  step: 'awaiting_confirmation' | 'awaiting_email';
   agentId: string;
   pairingCode: string;
 }

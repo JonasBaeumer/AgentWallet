@@ -125,8 +125,37 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     // Allow fire-and-forget handler to finish (handler does DB lookups before sending)
     await new Promise((r) => setTimeout(r, 100));
 
-    // Bot should have asked for email
-    expect(mockSendMessage).toHaveBeenCalledWith(chatId, expect.stringContaining('email'));
+    // Bot should have shown the confirmation keyboard with the agentId
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      chatId,
+      expect.stringContaining(agentId),
+      expect.objectContaining({ reply_markup: expect.anything() }),
+    );
+
+    // Step 3b: User taps "Confirm" — callback query with link_confirm:<chatId>
+    const confirmRes = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/telegram',
+      headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
+      payload: {
+        update_id: 10015,
+        callback_query: {
+          id: 'cb-confirm-1',
+          data: 'link_confirm:_',
+          from: { id: chatId },
+          message: { message_id: 1, chat: { id: chatId } },
+        },
+      },
+    });
+    expect(confirmRes.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Bot should have edited the message asking for email
+    expect(mockEditMessageText).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.stringContaining('email'),
+      expect.any(Object),
+    );
 
     // Step 4: User replies with email address (unique per run to avoid any collision)
     const testEmail = `onboarding-${Date.now()}@example.com`;
@@ -209,6 +238,13 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     });
     const { agentId, pairingCode: firstCode } = reg1.json();
 
+    // Backdate createdAt so the 5-minute per-agentId renewal cooldown is satisfied
+    // (simulate that the original code was issued 6 minutes ago)
+    await prisma.pairingCode.update({
+      where: { agentId },
+      data: { createdAt: new Date(Date.now() - 6 * 60 * 1000) },
+    });
+
     // Renew
     const reg2 = await app.inject({
       method: 'POST',
@@ -238,13 +274,29 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     });
     const { agentId, pairingCode } = reg.json();
 
-    // Simulate user claiming via Telegram
+    // Simulate user claiming via Telegram (including the new confirmation step)
     const chatId = 77776666;
     await app.inject({
       method: 'POST',
       url: '/v1/webhooks/telegram',
       headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
       payload: { update_id: 2001, message: { message_id: 1, chat: { id: chatId }, text: `/start ${pairingCode}` } },
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    // User taps Confirm
+    await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/telegram',
+      headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
+      payload: {
+        update_id: 20015,
+        callback_query: {
+          id: 'cb-confirm-2',
+          data: 'link_confirm:_',
+          from: { id: chatId },
+          message: { message_id: 1, chat: { id: chatId } },
+        },
+      },
     });
     await new Promise((r) => setTimeout(r, 100));
     await app.inject({

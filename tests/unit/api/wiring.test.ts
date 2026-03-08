@@ -855,7 +855,7 @@ describe('POST /v1/agent/register wiring', () => {
       id: 'pc-2', agentId: 'ag_renew', code: 'OLDCOD12',
       claimedByUserId: null,
       expiresAt: new Date(Date.now() + 60_000),
-      createdAt: new Date(),
+      createdAt: new Date(Date.now() - 6 * 60 * 1000), // 6 min ago — past cooldown
     };
 
     const res = await app.inject({
