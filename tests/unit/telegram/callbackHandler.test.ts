@@ -66,6 +66,16 @@ jest.mock('@/queue/producers', () => ({
   enqueueCheckout: mockEnqueueCheckout,
 }));
 
+// Session store mock
+const mockGetSession = jest.fn();
+const mockSetSession = jest.fn();
+const mockClearSession = jest.fn();
+jest.mock('@/telegram/sessionStore', () => ({
+  getSignupSession: (...args: any[]) => mockGetSession(...args),
+  setSignupSession: (...args: any[]) => mockSetSession(...args),
+  clearSignupSession: (...args: any[]) => mockClearSession(...args),
+}));
+
 const dbIntents: Record<string, any> = {};
 const dbIdempotency: Record<string, any> = {};
 
@@ -95,13 +105,16 @@ beforeEach(() => {
   mockAnswerCallbackQuery.mockResolvedValue(undefined);
   mockEditMessageText.mockResolvedValue(undefined);
   mockIssueCard.mockResolvedValue({ stripeCardId: 'ic_test', last4: '4242' });
+  mockGetSession.mockResolvedValue(null);
+  mockSetSession.mockResolvedValue(undefined);
+  mockClearSession.mockResolvedValue(undefined);
 });
 
-function makeUpdate(action: string, intentId: string, cbId = 'cb-1', fromId = 111): any {
+function makeUpdate(action: string, payload: string, cbId = 'cb-1', fromId = 111): any {
   return {
     callback_query: {
       id: cbId,
-      data: `${action}:${intentId}`,
+      data: `${action}:${payload}`,
       from: { id: fromId },
       message: { message_id: 10, chat: { id: 999 } },
     },
@@ -120,7 +133,80 @@ function seedAwaitingIntent(id: string) {
   };
 }
 
-// ─── Core behaviour ────────────────────────────────────────────────────────────
+// ─── link_confirm / link_cancel callbacks ──────────────────────────────────────
+
+describe('handleTelegramCallback — link_confirm', () => {
+  it('advances session to awaiting_email and edits message on confirm', async () => {
+    const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
+    mockGetSession.mockResolvedValue(session);
+
+    await handleTelegramCallback(makeUpdate('link_confirm', '12345678', 'cb-lc1'));
+
+    expect(mockSetSession).toHaveBeenCalledWith(
+      12345678,
+      expect.objectContaining({ step: 'awaiting_email', agentId: 'ag_test', pairingCode: 'ABCD1234' }),
+    );
+    expect(mockEditMessageText).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.stringContaining('email'),
+      expect.any(Object),
+    );
+  });
+
+  it('shows error message when session is missing or expired on confirm', async () => {
+    mockGetSession.mockResolvedValue(null);
+
+    await handleTelegramCallback(makeUpdate('link_confirm', '12345678', 'cb-lc2'));
+
+    expect(mockSetSession).not.toHaveBeenCalled();
+    expect(mockEditMessageText).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.stringContaining('Session expired'),
+      expect.any(Object),
+    );
+  });
+
+  it('does not touch purchase approval flow on link_confirm', async () => {
+    const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
+    mockGetSession.mockResolvedValue(session);
+
+    await handleTelegramCallback(makeUpdate('link_confirm', '12345678', 'cb-lc3'));
+
+    expect(mockRecordDecision).not.toHaveBeenCalled();
+    expect(mockIssueCard).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleTelegramCallback — link_cancel', () => {
+  it('clears session and edits message on cancel', async () => {
+    const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
+    mockGetSession.mockResolvedValue(session);
+
+    await handleTelegramCallback(makeUpdate('link_cancel', '12345678', 'cb-lcancel1'));
+
+    expect(mockClearSession).toHaveBeenCalledWith(12345678);
+    expect(mockEditMessageText).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.stringContaining('cancelled'),
+      expect.any(Object),
+    );
+  });
+
+  it('shows error message when session is missing on cancel', async () => {
+    mockGetSession.mockResolvedValue(null);
+
+    await handleTelegramCallback(makeUpdate('link_cancel', '12345678', 'cb-lcancel2'));
+
+    expect(mockClearSession).not.toHaveBeenCalled();
+    expect(mockEditMessageText).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(),
+      expect.stringContaining('Session expired'),
+      expect.any(Object),
+    );
+  });
+});
+
+// ─── Core approve/reject behaviour ────────────────────────────────────────────
 
 describe('handleTelegramCallback — approve path', () => {
   it('calls answerCallbackQuery first (before any DB work)', async () => {
