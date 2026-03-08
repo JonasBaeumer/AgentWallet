@@ -30,7 +30,7 @@ jest.mock('@/queue/producers', () => ({
   enqueueCheckout: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('@/payments/stripeClient', () => ({
+jest.mock('@/payments/providers/stripe/stripeClient', () => ({
   getStripeClient: () => ({ webhooks: { constructEvent: jest.fn() } }),
 }));
 
