@@ -54,8 +54,8 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
     });
 
     const keyboard = new InlineKeyboard()
-      .text('✅ Confirm', `link_confirm:${chatId}`)
-      .text('❌ Cancel', `link_cancel:${chatId}`);
+      .text('✅ Confirm', 'link_confirm:_')
+      .text('❌ Cancel', 'link_cancel:_');
 
     await bot.api.sendMessage(
       chatId,

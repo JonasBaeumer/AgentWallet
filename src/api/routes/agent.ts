@@ -196,8 +196,8 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       if (existing.claimedByUserId) {
         return reply.status(409).send({ error: 'Agent already has a linked user — re-registration not needed' });
       }
-      // Per-agentId rate limit: derive when the last code was issued from its expiry
-      const lastIssuedAt = existing.expiresAt.getTime() - PAIRING_CODE_TTL_MS;
+      // Per-agentId rate limit: use createdAt (set at issuance) to measure the cooldown
+      const lastIssuedAt = existing.createdAt.getTime();
       if (Date.now() - lastIssuedAt < PAIRING_CODE_RENEWAL_COOLDOWN_MS) {
         return reply.status(429).send({ error: 'Too many renewal requests for this agent — please wait before retrying' });
       }

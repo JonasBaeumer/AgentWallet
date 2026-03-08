@@ -140,7 +140,7 @@ describe('handleTelegramCallback — link_confirm', () => {
     const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
     mockGetSession.mockResolvedValue(session);
 
-    await handleTelegramCallback(makeUpdate('link_confirm', '12345678', 'cb-lc1'));
+    await handleTelegramCallback(makeUpdate('link_confirm', '_', 'cb-lc1', 12345678));
 
     expect(mockSetSession).toHaveBeenCalledWith(
       12345678,
@@ -156,7 +156,7 @@ describe('handleTelegramCallback — link_confirm', () => {
   it('shows error message when session is missing or expired on confirm', async () => {
     mockGetSession.mockResolvedValue(null);
 
-    await handleTelegramCallback(makeUpdate('link_confirm', '12345678', 'cb-lc2'));
+    await handleTelegramCallback(makeUpdate('link_confirm', '_', 'cb-lc2', 12345678));
 
     expect(mockSetSession).not.toHaveBeenCalled();
     expect(mockEditMessageText).toHaveBeenCalledWith(
@@ -170,7 +170,7 @@ describe('handleTelegramCallback — link_confirm', () => {
     const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
     mockGetSession.mockResolvedValue(session);
 
-    await handleTelegramCallback(makeUpdate('link_confirm', '12345678', 'cb-lc3'));
+    await handleTelegramCallback(makeUpdate('link_confirm', '_', 'cb-lc3', 12345678));
 
     expect(mockRecordDecision).not.toHaveBeenCalled();
     expect(mockIssueCard).not.toHaveBeenCalled();
@@ -182,7 +182,7 @@ describe('handleTelegramCallback — link_cancel', () => {
     const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
     mockGetSession.mockResolvedValue(session);
 
-    await handleTelegramCallback(makeUpdate('link_cancel', '12345678', 'cb-lcancel1'));
+    await handleTelegramCallback(makeUpdate('link_cancel', '_', 'cb-lcancel1', 12345678));
 
     expect(mockClearSession).toHaveBeenCalledWith(12345678);
     expect(mockEditMessageText).toHaveBeenCalledWith(
@@ -195,7 +195,7 @@ describe('handleTelegramCallback — link_cancel', () => {
   it('shows error message when session is missing on cancel', async () => {
     mockGetSession.mockResolvedValue(null);
 
-    await handleTelegramCallback(makeUpdate('link_cancel', '12345678', 'cb-lcancel2'));
+    await handleTelegramCallback(makeUpdate('link_cancel', '_', 'cb-lcancel2', 12345678));
 
     expect(mockClearSession).not.toHaveBeenCalled();
     expect(mockEditMessageText).toHaveBeenCalledWith(

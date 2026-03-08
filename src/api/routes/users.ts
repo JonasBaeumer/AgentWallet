@@ -53,18 +53,20 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
       select: { id: true },
     });
 
-    const cancelledIntentIds: string[] = [];
-    for (const intent of activeIntents) {
-      try {
-        await expireIntent(intent.id);
-        cancelledIntentIds.push(intent.id);
-      } catch {
-        // Log and continue — unlinking must not be blocked by a single failed expiry
-        fastify.log.warn({ message: 'Failed to expire intent during agent unlink', intentId: intent.id, userId });
-      }
-    }
+    const results = await Promise.allSettled(activeIntents.map((i) => expireIntent(i.id)));
+    const cancelledIntentIds = activeIntents
+      .filter((_, idx) => results[idx].status === 'fulfilled')
+      .map((i) => i.id);
 
-    // Remove agentId from user and clear the pairing code claim atomically
+    results.forEach((result, idx) => {
+      if (result.status === 'rejected') {
+        fastify.log.warn({ message: 'Failed to expire intent during agent unlink', intentId: activeIntents[idx].id, userId });
+      }
+    });
+
+    // Remove agentId from user and invalidate the pairing code atomically.
+    // Setting expiresAt to epoch (new Date(0)) prevents the code from being re-claimed
+    // during the remaining TTL window after unlinking.
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },
@@ -73,7 +75,7 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
 
       await tx.pairingCode.updateMany({
         where: { agentId, claimedByUserId: userId },
-        data: { claimedByUserId: null },
+        data: { claimedByUserId: null, expiresAt: new Date(0) },
       });
 
       await tx.auditEvent.create({

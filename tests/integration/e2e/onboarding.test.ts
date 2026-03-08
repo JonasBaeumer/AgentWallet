@@ -141,7 +141,7 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
         update_id: 10015,
         callback_query: {
           id: 'cb-confirm-1',
-          data: `link_confirm:${chatId}`,
+          data: 'link_confirm:_',
           from: { id: chatId },
           message: { message_id: 1, chat: { id: chatId } },
         },
@@ -238,11 +238,11 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     });
     const { agentId, pairingCode: firstCode } = reg1.json();
 
-    // Backdate expiresAt so the 5-minute per-agentId renewal cooldown is satisfied
+    // Backdate createdAt so the 5-minute per-agentId renewal cooldown is satisfied
     // (simulate that the original code was issued 6 minutes ago)
     await prisma.pairingCode.update({
       where: { agentId },
-      data: { expiresAt: new Date(Date.now() + (10 - 6) * 60 * 1000) }, // expiresAt = now+4min → issuedAt = now-6min
+      data: { createdAt: new Date(Date.now() - 6 * 60 * 1000) },
     });
 
     // Renew
@@ -292,7 +292,7 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
         update_id: 20015,
         callback_query: {
           id: 'cb-confirm-2',
-          data: `link_confirm:${chatId}`,
+          data: 'link_confirm:_',
           from: { id: chatId },
           message: { message_id: 1, chat: { id: chatId } },
         },

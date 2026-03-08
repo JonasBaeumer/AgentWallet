@@ -34,6 +34,7 @@ jest.mock('@/payments', () => ({
     revealCard: jest.fn(),
     cancelCard: jest.fn(),
     handleWebhookEvent: jest.fn(),
+    getIssuingBalance: jest.fn(),
   }),
 }));
 jest.mock('@/telegram/notificationService', () => ({
@@ -158,15 +159,13 @@ describe('POST /v1/agent/register — per-agentId cooldown', () => {
   it('allows renewal once the 5-minute cooldown has passed', async () => {
     // Seed a record where the code was issued 6 minutes ago
     const sixMinutesAgo = Date.now() - 6 * 60 * 1000;
-    const TTL_MS = 10 * 60 * 1000;
     dbPairingCodes['ag_cool2'] = {
       id: 'pc-cool2',
       agentId: 'ag_cool2',
       code: 'OLDCOOL1',
       claimedByUserId: null,
-      // expiresAt = issuedAt + TTL = (now - 6min) + 10min = now + 4min
-      expiresAt: new Date(sixMinutesAgo + TTL_MS),
-      createdAt: new Date(sixMinutesAgo),
+      expiresAt: new Date(Date.now() + 4 * 60 * 1000),
+      createdAt: new Date(sixMinutesAgo), // cooldown reads createdAt directly
     };
 
     const res = await app.inject({

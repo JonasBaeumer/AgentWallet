@@ -234,7 +234,7 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
     );
   });
 
-  it('clears claimedByUserId from PairingCode in the transaction', async () => {
+  it('invalidates PairingCode by clearing claim and setting expiresAt to epoch', async () => {
     seedUser('ag_linked');
 
     await app.inject({
@@ -246,7 +246,7 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
     expect(txMock.pairingCode.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { agentId: 'ag_linked', claimedByUserId: 'user-1' },
-        data: { claimedByUserId: null },
+        data: { claimedByUserId: null, expiresAt: new Date(0) },
       }),
     );
   });
@@ -289,10 +289,14 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
     expect(body.cancelledIntentIds).toEqual(['i-active']);
   });
 
-  it('continues unlinking even if expiring an intent fails', async () => {
+  it('continues unlinking even if expiring an intent fails, and omits failed intent from cancelledIntentIds', async () => {
     seedUser('ag_linked');
-    dbIntents['i-fail'] = { id: 'i-fail', userId: 'user-1', status: IntentStatus.SEARCHING };
-    mockExpireIntent.mockRejectedValueOnce(new Error('state machine error'));
+    dbIntents['i-ok'] = { id: 'i-ok', userId: 'user-1', status: IntentStatus.SEARCHING };
+    dbIntents['i-fail'] = { id: 'i-fail', userId: 'user-1', status: IntentStatus.AWAITING_APPROVAL };
+    // First call succeeds, second fails
+    mockExpireIntent
+      .mockResolvedValueOnce({ newStatus: 'EXPIRED' })
+      .mockRejectedValueOnce(new Error('state machine error'));
 
     const res = await app.inject({
       method: 'POST',
@@ -300,8 +304,12 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
       headers: { authorization: AUTH },
     });
 
-    // Unlink still succeeds despite the expiry failure
+    // Unlink still succeeds despite the partial expiry failure
     expect(res.statusCode).toBe(200);
     expect(txMock.user.update).toHaveBeenCalled();
+    // Only the successfully expired intent appears in the response
+    const body = res.json();
+    expect(body.cancelledIntentIds).toHaveLength(1);
+    expect(body.cancelledIntentIds).not.toContain('i-fail');
   });
 });

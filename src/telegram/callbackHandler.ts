@@ -32,9 +32,9 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
 
   // ── Agent linking confirmation callbacks ─────────────────────────────────────
   if (action === 'link_confirm' || action === 'link_cancel') {
-    // payload is the chatId of the user who initiated /start
-    const signingChatId = Number(payload);
-    const session = await getSignupSession(signingChatId);
+    // chatId is the private chat where the confirmation message was sent —
+    // the same key used to store the signup session in signupHandler.
+    const session = await getSignupSession(fromId);
 
     if (!session || session.step !== 'awaiting_confirmation') {
       await editMessage(bot, chatId, messageId, '⚠️ Session expired or not found. Please start again with /start <code>.');
@@ -42,13 +42,13 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
     }
 
     if (action === 'link_cancel') {
-      await clearSignupSession(signingChatId);
+      await clearSignupSession(fromId);
       await editMessage(bot, chatId, messageId, '❌ Linking cancelled. You can start again with /start <code>.');
       return;
     }
 
     // link_confirm: advance session to awaiting_email
-    await setSignupSession(signingChatId, { ...session, step: 'awaiting_email' });
+    await setSignupSession(fromId, { ...session, step: 'awaiting_email' });
     await editMessage(bot, chatId, messageId, `✅ Confirmed! What email address should we use for your account?`);
     return;
   }
