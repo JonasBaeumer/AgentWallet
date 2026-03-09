@@ -460,10 +460,11 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     expect(JSON.parse(res.body).error).toContain('Insufficient funds');
   });
 
-  it('calls getIssuingBalance before reserveForIntent', async () => {
+  it('calls getIssuingBalance before recordDecision and reserveForIntent', async () => {
     seedAwaitingIntent('intent-a9');
     const order: string[] = [];
     mockGetIssuingBalance.mockImplementationOnce(() => { order.push('getIssuingBalance'); return Promise.resolve({ available: 999_999_99, currency: 'gbp' }); });
+    mockRecordDecision.mockImplementationOnce(() => { order.push('recordDecision'); return Promise.resolve({ decision: 'APPROVED' }); });
     mockReserveForIntent.mockImplementationOnce(() => { order.push('reserveForIntent'); return Promise.resolve({ id: 'pot-1', reservedAmount: 10000 }); });
 
     await app.inject({
@@ -473,10 +474,10 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
-    expect(order).toEqual(['getIssuingBalance', 'reserveForIntent']);
+    expect(order).toEqual(['getIssuingBalance', 'recordDecision', 'reserveForIntent']);
   });
 
-  it('returns 422 when Stripe Issuing balance is insufficient', async () => {
+  it('returns 422 when Stripe Issuing balance is insufficient — no recordDecision or reserve', async () => {
     seedAwaitingIntent('intent-a10');
     mockGetIssuingBalance.mockResolvedValueOnce({ available: 500, currency: 'gbp' });
 
@@ -489,6 +490,7 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
 
     expect(res.statusCode).toBe(422);
     expect(JSON.parse(res.body).error).toContain('Insufficient Stripe Issuing balance');
+    expect(mockRecordDecision).not.toHaveBeenCalled();
     expect(mockReserveForIntent).not.toHaveBeenCalled();
     expect(mockIssueVirtualCard).not.toHaveBeenCalled();
   });

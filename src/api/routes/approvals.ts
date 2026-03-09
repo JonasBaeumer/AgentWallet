@@ -59,19 +59,19 @@ export async function approvalRoutes(fastify: FastifyInstance): Promise<void> {
     const actorId = request.user!.id;
 
     try {
-      // 1. Record decision — idempotent, transitions intent to APPROVED or DENIED
-      await recordDecision(intentId, decisionType, actorId, reason);
-
       let finalStatus: IntentStatus;
 
       if (decisionType === ApprovalDecisionType.APPROVED) {
         const metadata = intent.metadata as Record<string, unknown>;
 
-        // 2. Check Stripe Issuing balance covers the requested amount
+        // 1. Check Stripe Issuing balance BEFORE persisting the decision
         const issuingBalance = await getPaymentProvider().getIssuingBalance(intent.currency);
         if (issuingBalance.available < intent.maxBudget) {
           throw new InsufficientIssuingBalanceError(issuingBalance.available, intent.maxBudget, intent.currency);
         }
+
+        // 2. Record decision — transitions intent to APPROVED
+        await recordDecision(intentId, decisionType, actorId, reason);
 
         // 3. Reserve funds in ledger pot (deducts from user.mainBalance)
         await reserveForIntent(intent.userId, intentId, intent.maxBudget);
@@ -83,7 +83,6 @@ export async function approvalRoutes(fastify: FastifyInstance): Promise<void> {
             mccAllowlist: intent.user.mccAllowlist,
           });
         } catch (cardErr) {
-          // Card issuance failed — return reserved funds so balance is not lost
           await returnIntent(intentId).catch(() => {});
           throw cardErr;
         }
@@ -108,6 +107,8 @@ export async function approvalRoutes(fastify: FastifyInstance): Promise<void> {
 
         finalStatus = IntentStatus.CHECKOUT_RUNNING;
       } else {
+        // Record denial
+        await recordDecision(intentId, decisionType, actorId, reason);
         finalStatus = IntentStatus.DENIED;
       }
 

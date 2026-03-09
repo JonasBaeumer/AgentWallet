@@ -125,23 +125,25 @@ function seedAwaitingIntent(id: string) {
 // ─── Core behaviour ────────────────────────────────────────────────────────────
 
 describe('handleTelegramCallback — approve path', () => {
-  it('calls answerCallbackQuery first (before any DB work)', async () => {
+  it('calls answerCallbackQuery first (before any service work)', async () => {
     seedAwaitingIntent('intent-cb1');
     const callOrder: string[] = [];
     mockAnswerCallbackQuery.mockImplementation(() => { callOrder.push('answer'); return Promise.resolve(); });
+    mockGetIssuingBalance.mockImplementation(() => { callOrder.push('balance'); return Promise.resolve({ available: 999_999_99, currency: 'gbp' }); });
     mockRecordDecision.mockImplementation(() => { callOrder.push('record'); return Promise.resolve({}); });
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-cb1', 'cb-cb1'));
 
     expect(callOrder[0]).toBe('answer');
-    expect(callOrder[1]).toBe('record');
+    expect(callOrder[1]).toBe('balance');
+    expect(callOrder[2]).toBe('record');
   });
 
-  it('calls all 7 service functions in correct order', async () => {
+  it('calls all 7 service functions in correct order (balance before recordDecision)', async () => {
     seedAwaitingIntent('intent-cb2');
     const order: string[] = [];
-    mockRecordDecision.mockImplementation(() => { order.push('recordDecision'); return Promise.resolve({}); });
     mockGetIssuingBalance.mockImplementation(() => { order.push('getIssuingBalance'); return Promise.resolve({ available: 999_999_99, currency: 'gbp' }); });
+    mockRecordDecision.mockImplementation(() => { order.push('recordDecision'); return Promise.resolve({}); });
     mockReserveForIntent.mockImplementation(() => { order.push('reserveForIntent'); return Promise.resolve({}); });
     mockIssueCard.mockImplementation(() => { order.push('issueCard'); return Promise.resolve({ stripeCardId: 'ic_t', last4: '4242' }); });
     mockMarkCardIssued.mockImplementation(() => { order.push('markCardIssued'); return Promise.resolve({}); });
@@ -151,8 +153,8 @@ describe('handleTelegramCallback — approve path', () => {
     await handleTelegramCallback(makeUpdate('approve', 'intent-cb2', 'cb-cb2'));
 
     expect(order).toEqual([
-      'recordDecision',
       'getIssuingBalance',
+      'recordDecision',
       'reserveForIntent',
       'issueCard',
       'markCardIssued',
@@ -226,12 +228,13 @@ describe('handleTelegramCallback — idempotency guard', () => {
 });
 
 describe('handleTelegramCallback — insufficient Issuing balance', () => {
-  it('does not reserve or issue card when Issuing balance is insufficient', async () => {
+  it('does not record decision, reserve, or issue card when Issuing balance is insufficient', async () => {
     seedAwaitingIntent('intent-bal1');
     mockGetIssuingBalance.mockResolvedValueOnce({ available: 500, currency: 'gbp' });
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-bal1', 'cb-bal1'));
 
+    expect(mockRecordDecision).not.toHaveBeenCalled();
     expect(mockReserveForIntent).not.toHaveBeenCalled();
     expect(mockIssueCard).not.toHaveBeenCalled();
     expect(mockEnqueueCheckout).not.toHaveBeenCalled();

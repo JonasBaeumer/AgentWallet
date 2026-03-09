@@ -69,13 +69,13 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
     if (action === 'approve') {
       const metadata = intent.metadata as Record<string, unknown>;
 
-      await recordDecision(intentId, ApprovalDecisionType.APPROVED, actorId);
-
+      // Check Stripe Issuing balance BEFORE persisting the decision
       const issuingBalance = await getPaymentProvider().getIssuingBalance(intent.currency);
       if (issuingBalance.available < intent.maxBudget) {
         throw new InsufficientIssuingBalanceError(issuingBalance.available, intent.maxBudget, intent.currency);
       }
 
+      await recordDecision(intentId, ApprovalDecisionType.APPROVED, actorId);
       await reserveForIntent(intent.userId, intentId, intent.maxBudget);
 
       let card;
