@@ -1,6 +1,6 @@
 import type { Update } from 'grammy/types';
 import { prisma } from '@/db/client';
-import { ApprovalDecisionType, IntentStatus } from '@/contracts';
+import { ApprovalDecisionType, IntentStatus, InsufficientIssuingBalanceError } from '@/contracts';
 import { recordDecision } from '@/approval/approvalService';
 import { reserveForIntent, returnIntent } from '@/ledger/potService';
 import { getPaymentProvider } from '@/payments';
@@ -96,6 +96,12 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
     if (action === 'approve') {
       const metadata = intent.metadata as Record<string, unknown>;
 
+      // Check Stripe Issuing balance BEFORE persisting the decision
+      const issuingBalance = await getPaymentProvider().getIssuingBalance(intent.currency);
+      if (issuingBalance.available < intent.maxBudget) {
+        throw new InsufficientIssuingBalanceError(issuingBalance.available, intent.maxBudget, intent.currency);
+      }
+
       await recordDecision(intentId, ApprovalDecisionType.APPROVED, actorId);
       await reserveForIntent(intent.userId, intentId, intent.maxBudget);
 
@@ -128,6 +134,11 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
       resultText = '❌ Rejected.';
     }
   } catch (err) {
+    if (err instanceof InsufficientIssuingBalanceError) {
+      await editMessage(bot, chatId, messageId,
+        `⚠️ Insufficient Stripe Issuing balance (${err.currency}): available ${err.available}, required ${err.required}.`);
+      return;
+    }
     await editMessage(bot, chatId, messageId, '⚠️ Something went wrong processing your decision. Please try via the app.');
     throw err;
   }

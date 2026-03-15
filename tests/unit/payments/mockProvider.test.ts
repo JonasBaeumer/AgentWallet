@@ -144,6 +144,45 @@ describe('MockPaymentProvider', () => {
     });
   });
 
+  describe('getIssuingBalance', () => {
+    it('returns a high default balance', async () => {
+      const result = await provider.getIssuingBalance('gbp');
+
+      expect(result).toEqual({ available: 999_999_99, currency: 'gbp' });
+    });
+
+    it('normalises currency to lowercase', async () => {
+      const result = await provider.getIssuingBalance('EUR');
+
+      expect(result.currency).toBe('eur');
+    });
+
+    it('records the call', async () => {
+      await provider.getIssuingBalance('usd');
+
+      const calls = provider.getCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0].method).toBe('getIssuingBalance');
+      expect(calls[0].args).toEqual(['usd']);
+    });
+
+    it('returns overridden balance after setIssuingBalance', async () => {
+      provider.setIssuingBalance(500);
+
+      const result = await provider.getIssuingBalance('gbp');
+
+      expect(result.available).toBe(500);
+    });
+
+    it('setIssuingBalance(0) makes balance zero', async () => {
+      provider.setIssuingBalance(0);
+
+      const result = await provider.getIssuingBalance('gbp');
+
+      expect(result.available).toBe(0);
+    });
+  });
+
   describe('clearCalls', () => {
     it('removes all recorded calls', async () => {
       await provider.issueCard('i1', 1000, 'eur');

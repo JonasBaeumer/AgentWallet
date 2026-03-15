@@ -1,9 +1,10 @@
-import { IPaymentProvider, VirtualCardData, CardReveal } from '@/contracts';
+import { IPaymentProvider, IssuingBalance, VirtualCardData, CardReveal } from '@/contracts';
 
 type CallRecord = { method: string; args: unknown[]; timestamp: number };
 
 export class MockPaymentProvider implements IPaymentProvider {
   private calls: CallRecord[] = [];
+  private issuingBalance = 999_999_99;
 
   getCalls(): CallRecord[] {
     return [...this.calls];
@@ -47,5 +48,14 @@ export class MockPaymentProvider implements IPaymentProvider {
 
   async handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<void> {
     this.calls.push({ method: 'handleWebhookEvent', args: [rawBody, signature], timestamp: Date.now() });
+  }
+
+  async getIssuingBalance(currency: string): Promise<IssuingBalance> {
+    this.calls.push({ method: 'getIssuingBalance', args: [currency], timestamp: Date.now() });
+    return { available: this.issuingBalance, currency: currency.toLowerCase() };
+  }
+
+  setIssuingBalance(amount: number): void {
+    this.issuingBalance = amount;
   }
 }

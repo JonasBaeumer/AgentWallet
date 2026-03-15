@@ -104,5 +104,6 @@ describe('providerFactory', () => {
     expect(typeof provider.freezeCard).toBe('function');
     expect(typeof provider.cancelCard).toBe('function');
     expect(typeof provider.handleWebhookEvent).toBe('function');
+    expect(typeof provider.getIssuingBalance).toBe('function');
   });
 });

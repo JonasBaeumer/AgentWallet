@@ -82,12 +82,14 @@ const mockRevealCard = jest.fn().mockResolvedValue({
   number: '4242424242424242', cvc: '123', expMonth: 12, expYear: 2027, last4: '4242',
 });
 const mockCancelCard = jest.fn().mockResolvedValue(undefined);
+const mockGetIssuingBalance = jest.fn().mockResolvedValue({ available: 999_999_99, currency: 'gbp' });
 const mockPaymentProvider = {
   issueCard: mockIssueVirtualCard,
   revealCard: mockRevealCard,
   freezeCard: jest.fn().mockResolvedValue(undefined),
   cancelCard: mockCancelCard,
   handleWebhookEvent: jest.fn().mockResolvedValue(undefined),
+  getIssuingBalance: mockGetIssuingBalance,
 };
 jest.mock('@/payments', () => ({
   getPaymentProvider: () => mockPaymentProvider,
@@ -456,6 +458,41 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
 
     expect(res.statusCode).toBe(422);
     expect(JSON.parse(res.body).error).toContain('Insufficient funds');
+  });
+
+  it('calls getIssuingBalance before recordDecision and reserveForIntent', async () => {
+    seedAwaitingIntent('intent-a9');
+    const order: string[] = [];
+    mockGetIssuingBalance.mockImplementationOnce(() => { order.push('getIssuingBalance'); return Promise.resolve({ available: 999_999_99, currency: 'gbp' }); });
+    mockRecordDecision.mockImplementationOnce(() => { order.push('recordDecision'); return Promise.resolve({ decision: 'APPROVED' }); });
+    mockReserveForIntent.mockImplementationOnce(() => { order.push('reserveForIntent'); return Promise.resolve({ id: 'pot-1', reservedAmount: 10000 }); });
+
+    await app.inject({
+      method: 'POST',
+      url: '/v1/approvals/intent-a9/decision',
+      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-9', authorization: AUTH_HEADER },
+      body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
+    });
+
+    expect(order).toEqual(['getIssuingBalance', 'recordDecision', 'reserveForIntent']);
+  });
+
+  it('returns 422 when Stripe Issuing balance is insufficient — no recordDecision or reserve', async () => {
+    seedAwaitingIntent('intent-a10');
+    mockGetIssuingBalance.mockResolvedValueOnce({ available: 500, currency: 'gbp' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/approvals/intent-a10/decision',
+      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-10', authorization: AUTH_HEADER },
+      body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error).toContain('Insufficient Stripe Issuing balance');
+    expect(mockRecordDecision).not.toHaveBeenCalled();
+    expect(mockReserveForIntent).not.toHaveBeenCalled();
+    expect(mockIssueVirtualCard).not.toHaveBeenCalled();
   });
 
   it('response status is CHECKOUT_RUNNING when approved', async () => {

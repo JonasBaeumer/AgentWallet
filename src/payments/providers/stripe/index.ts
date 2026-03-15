@@ -1,5 +1,6 @@
-import { IPaymentProvider, VirtualCardData, CardReveal } from '@/contracts';
+import { IPaymentProvider, IssuingBalance, VirtualCardData, CardReveal } from '@/contracts';
 import { issueVirtualCard, revealCard, freezeCard, cancelCard } from './cardService';
+import { getIssuingBalance as fetchIssuingBalance } from './balanceService';
 import { handleStripeEvent } from './webhookHandler';
 
 export class StripePaymentProvider implements IPaymentProvider {
@@ -26,5 +27,9 @@ export class StripePaymentProvider implements IPaymentProvider {
 
   async handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<void> {
     return handleStripeEvent(rawBody, signature);
+  }
+
+  async getIssuingBalance(currency: string): Promise<IssuingBalance> {
+    return fetchIssuingBalance(currency);
   }
 }
