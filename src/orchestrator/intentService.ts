@@ -1,6 +1,8 @@
 import { prisma } from '@/db/client';
 import { IntentEvent, PurchaseIntentData, AuditEventData, IntentNotFoundError } from '@/contracts';
 import { transitionIntent, TransitionResult } from './stateMachine';
+import { getPaymentProvider } from '@/payments';
+import { returnIntent } from '@/ledger/potService';
 
 export async function getIntentWithHistory(intentId: string): Promise<{
   intent: PurchaseIntentData;
@@ -60,6 +62,26 @@ export async function failCheckout(intentId: string, errorMessage: string): Prom
   return transitionIntent(intentId, IntentEvent.CHECKOUT_FAILED, { errorMessage });
 }
 
+async function cleanupExpiredIntent(intentId: string): Promise<void> {
+  const card = await prisma.virtualCard.findUnique({ where: { intentId } });
+  if (card) {
+    await getPaymentProvider().cancelCard(intentId).catch((err) => {
+      console.error({ intentId, err }, 'Failed to cancel card during expiry cleanup');
+    });
+  }
+
+  const pot = await prisma.pot.findFirst({ where: { intentId, status: 'ACTIVE' } });
+  if (pot) {
+    await returnIntent(intentId).catch((err) => {
+      console.error({ intentId, err }, 'Failed to return funds during expiry cleanup');
+    });
+  }
+}
+
 export async function expireIntent(intentId: string): Promise<TransitionResult> {
-  return transitionIntent(intentId, IntentEvent.INTENT_EXPIRED);
+  const result = await transitionIntent(intentId, IntentEvent.INTENT_EXPIRED);
+  await cleanupExpiredIntent(intentId).catch((err) => {
+    console.error({ intentId, err }, 'Failed to run expiry cleanup');
+  });
+  return result;
 }
