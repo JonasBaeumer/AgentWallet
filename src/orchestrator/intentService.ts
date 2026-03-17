@@ -80,6 +80,8 @@ async function cleanupExpiredIntent(intentId: string): Promise<void> {
 
 export async function expireIntent(intentId: string): Promise<TransitionResult> {
   const result = await transitionIntent(intentId, IntentEvent.INTENT_EXPIRED);
-  await cleanupExpiredIntent(intentId);
+  await cleanupExpiredIntent(intentId).catch((err) => {
+    console.error({ intentId, err }, 'Failed to run expiry cleanup');
+  });
   return result;
 }

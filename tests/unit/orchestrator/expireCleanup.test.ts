@@ -101,4 +101,10 @@ describe('expireIntent cleanup', () => {
 
     expect(mockReturnIntent).not.toHaveBeenCalled();
   });
+
+  it('resolves when a Prisma lookup inside cleanup throws', async () => {
+    (mockPrisma.virtualCard.findUnique as jest.Mock).mockRejectedValue(new Error('DB connection lost'));
+
+    await expect(expireIntent('intent-1')).resolves.toEqual(mockTransitionResult);
+  });
 });
