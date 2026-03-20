@@ -157,16 +157,57 @@ STRIPE_WEBHOOK_SECRET=whsec_your_secret_here
 
 ---
 
-## 7. About the `issuing_authorization.request` event
+## 7. Real-time authorization endpoint (`issuing_authorization.request`)
 
-This event is special — it triggers **real-time authorization**. When Stripe receives a charge attempt on your card, it sends this event and **waits up to 2 seconds** for your server to respond with approve/decline.
+`issuing_authorization.request` is a **synchronous** event — Stripe sends it when a charge attempt is made on your card and **waits up to 2 seconds** for your server to respond with `{ approved: true }` or `{ approved: false }`. If no response is received in time, Stripe declines the authorization.
 
-**Important rules:**
+### Critical: this is configured in Issuing Settings, not the Webhooks page
 
-- Only subscribe to `issuing_authorization.request` **if your server is running and reachable** at the webhook URL
-- If Stripe sends the event and your server doesn't respond in time, the authorization is **declined** with `webhook_timeout`
-- For local development without a running server, only subscribe to `issuing_authorization.created` and `issuing_transaction.created`
-- When running the dev server with `stripe listen`, the Stripe CLI handles the forwarding and the `webhookHandler.ts` auto-approves these events
+The real-time authorization endpoint is **not** configured under the regular Webhooks page. It lives in:
+
+**Stripe Dashboard → Settings → Issuing → Realtime authorization**
+
+(Or navigate directly: `dashboard.stripe.com/settings/issuing`)
+
+After you configure the endpoint URL there, Stripe creates a **separate signing secret** for it. You can find this secret by going to **Developers → Webhooks** (`dashboard.stripe.com/webhooks`) — look for the Issuing endpoint in the list and click "Reveal" next to its signing secret.
+
+### `stripe listen` does NOT work for real-time authorization
+
+`stripe listen --forward-to localhost:3000/v1/webhooks/stripe` is **one-way**. It forwards events from Stripe to your local server but it cannot relay your server's response (`{ approved: true }`) back to Stripe within the 2-second synchronous window.
+
+If you use `stripe listen` for sync auth, every authorization will be declined — Stripe never receives your approve response.
+
+### Local development setup with ngrok
+
+To test real-time authorization locally, you need a publicly-reachable tunnel:
+
+```bash
+# 1. Install ngrok and start a tunnel to your local server
+ngrok http 3000
+# Note the https URL, e.g. https://abc123.ngrok.io
+
+# 2. Start your dev server
+npm run dev
+
+# 3. Register the tunnel URL in Stripe Dashboard → Settings → Issuing → Realtime authorization
+#    URL: https://abc123.ngrok.io/v1/webhooks/stripe
+
+# 4. Copy the signing secret from Dashboard → Developers → Webhooks (the Issuing endpoint)
+#    and update your .env:
+STRIPE_WEBHOOK_SECRET=whsec_the_issuing_endpoint_secret
+```
+
+> **Note:** The `Stripe-Version` response header is added automatically by the server (`webhooks.ts`). You do not need to configure this manually.
+
+### For local development without real-time auth
+
+If you are not testing the card authorization flow, skip the Issuing Settings endpoint entirely. Use `stripe listen` for the regular async events only:
+
+```bash
+stripe listen --forward-to localhost:3000/v1/webhooks/stripe
+# Handles: issuing_authorization.created, issuing_transaction.created
+# Does NOT handle: issuing_authorization.request (sync auth)
+```
 
 ---
 
@@ -241,6 +282,9 @@ Tests are automatically skipped when `STRIPE_SECRET_KEY` is not a `sk_test_*` ke
 | `You must verify your business before you can top up in test mode` | Business details not filled in | [Settings → Account details](https://dashboard.stripe.com/test/settings/account) → fill in placeholder data (step 4) |
 | `insufficient_funds` on authorization | Issuing balance is €0 | [Dashboard → Balances](https://dashboard.stripe.com/test/balance/overview) → Issuing balance → Add to balance (step 5) |
 | `webhook_timeout` on authorization | `issuing_authorization.request` subscribed but server is not reachable | Remove that event from the webhook endpoint, or make sure your server is running (step 7) |
+| `webhook_error: "Invalid Stripe API version: "` | Real-time auth endpoint has no API version set, or server response is missing `Stripe-Version` header | The server sets this header automatically — ensure you are hitting the live server, not a mock |
+| Auth declined with no `webhook_error` | Likely using `stripe listen` for sync auth — it is one-way and cannot relay the response back | Use an ngrok tunnel and register the URL in Dashboard → Settings → Issuing (step 7) |
+| `reason: card_inactive` | Card was created but is not yet active | Wait a few seconds after card creation, or check that the cardholder has passed verification |
 | `cardholder_phone_number_required` | Cardholder has no phone number | Include `phone_number` when creating a cardholder (the code in `cardService.ts` already does this) |
 | `Issuing top-ups of type sepa_credit_transfer cannot be done` | Sandbox account, business not verified | Complete business verification (step 4), then fund via Dashboard |
 | `Invalid API Key provided` | Wrong key or extra whitespace in `.env` | Double-check `STRIPE_SECRET_KEY` — no quotes, no trailing spaces |
