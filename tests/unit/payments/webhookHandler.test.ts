@@ -1,8 +1,6 @@
-const mockApprove = jest.fn().mockResolvedValue({});
 const mockConstructEvent = jest.fn();
 const mockStripe = {
   webhooks: { constructEvent: mockConstructEvent },
-  issuing: { authorizations: { approve: mockApprove } },
 };
 
 jest.mock('@/payments/providers/stripe/stripeClient', () => ({
@@ -62,9 +60,9 @@ describe('issuing_authorization.request', () => {
     mockConstructEvent.mockReturnValue(makeEvent('issuing_authorization.request', authObj));
   });
 
-  it('approves the authorization via Stripe SDK', async () => {
-    await handleStripeEvent(RAW_BODY, SIGNATURE);
-    expect(mockApprove).toHaveBeenCalledWith('iauth_1');
+  it('returns { approved: true } in the response body', async () => {
+    const result = await handleStripeEvent(RAW_BODY, SIGNATURE);
+    expect(result).toEqual({ approved: true });
   });
 
   it('logs STRIPE_AUTHORIZATION_REQUEST audit event', async () => {
@@ -77,17 +75,6 @@ describe('issuing_authorization.request', () => {
         payload: { authId: 'iauth_1', amount: 5000 },
       },
     });
-  });
-
-  it('still logs audit event even when approve fails', async () => {
-    mockApprove.mockRejectedValueOnce(new Error('approve failed'));
-    await handleStripeEvent(RAW_BODY, SIGNATURE);
-    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not throw when approve fails', async () => {
-    mockApprove.mockRejectedValueOnce(new Error('approve failed'));
-    await expect(handleStripeEvent(RAW_BODY, SIGNATURE)).resolves.toBeUndefined();
   });
 });
 
@@ -108,11 +95,11 @@ describe('issuing_authorization.created', () => {
     });
   });
 
-  it('does not call authorize.approve', async () => {
+  it('returns { received: true }', async () => {
     const authObj = { id: 'iauth_2', amount: 3000, metadata: { intentId: 'intent-2' } };
     mockConstructEvent.mockReturnValue(makeEvent('issuing_authorization.created', authObj));
-    await handleStripeEvent(RAW_BODY, SIGNATURE);
-    expect(mockApprove).not.toHaveBeenCalled();
+    const result = await handleStripeEvent(RAW_BODY, SIGNATURE);
+    expect(result).toEqual({ received: true });
   });
 });
 
@@ -137,9 +124,10 @@ describe('issuing_transaction.created', () => {
 // ─── Unknown / unhandled events ──────────────────────────────────────────────
 
 describe('unhandled event types', () => {
-  it('does not throw for unknown event type', async () => {
+  it('returns { received: true } for unknown event type', async () => {
     mockConstructEvent.mockReturnValue(makeEvent('customer.created', { id: 'cus_1' }));
-    await expect(handleStripeEvent(RAW_BODY, SIGNATURE)).resolves.toBeUndefined();
+    const result = await handleStripeEvent(RAW_BODY, SIGNATURE);
+    expect(result).toEqual({ received: true });
   });
 
   it('does not log an audit event for unknown event type', async () => {
@@ -159,10 +147,11 @@ describe('audit logging edge cases', () => {
     expect(mockAuditCreate).not.toHaveBeenCalled();
   });
 
-  it('does not throw when audit DB write fails', async () => {
+  it('still returns { received: true } when audit DB write fails', async () => {
     const authObj = { id: 'iauth_3', amount: 2000, metadata: { intentId: 'intent-4' } };
     mockConstructEvent.mockReturnValue(makeEvent('issuing_authorization.created', authObj));
     mockAuditCreate.mockRejectedValueOnce(new Error('DB down'));
-    await expect(handleStripeEvent(RAW_BODY, SIGNATURE)).resolves.toBeUndefined();
+    const result = await handleStripeEvent(RAW_BODY, SIGNATURE);
+    expect(result).toEqual({ received: true });
   });
 });
