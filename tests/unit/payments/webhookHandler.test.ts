@@ -12,6 +12,11 @@ jest.mock('@/db/client', () => ({
   prisma: { auditEvent: { create: mockAuditCreate } },
 }));
 
+const mockReconcileIntent = jest.fn();
+jest.mock('@/payments/providers/stripe/reconciliationService', () => ({
+  reconcileIntent: (...args: any[]) => mockReconcileIntent(...args),
+}));
+
 import { handleStripeEvent } from '@/payments/providers/stripe/webhookHandler';
 
 const RAW_BODY = Buffer.from('{"test":true}');
@@ -27,6 +32,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockReconcileIntent.mockResolvedValue({ inSync: true, discrepancies: [] });
 });
 
 // ─── Signature verification ──────────────────────────────────────────────────
@@ -118,6 +124,51 @@ describe('issuing_transaction.created', () => {
         payload: { transactionId: 'itxn_1', amount: 4500 },
       },
     });
+  });
+});
+
+// ─── issuing_transaction.created — reconciliation ────────────────────────────
+
+describe('issuing_transaction.created reconciliation', () => {
+  const txnObj = { id: 'itxn_r1', amount: 4500, metadata: { intentId: 'intent-recon' } };
+
+  beforeEach(() => {
+    mockConstructEvent.mockReturnValue(makeEvent('issuing_transaction.created', txnObj));
+  });
+
+  it('calls reconcileIntent with the intentId', async () => {
+    mockReconcileIntent.mockResolvedValue({ inSync: true, discrepancies: [] });
+    await handleStripeEvent(RAW_BODY, SIGNATURE);
+    // Allow fire-and-forget to settle
+    await new Promise(resolve => setImmediate(resolve));
+    expect(mockReconcileIntent).toHaveBeenCalledWith('intent-recon');
+  });
+
+  it('logs RECONCILIATION_DISCREPANCY when reconcileIntent returns inSync:false', async () => {
+    const discrepancies = ['settledAmount 3500 != stripe captured 4000'];
+    const report = { inSync: false, discrepancies, intentId: 'intent-recon', internal: {}, stripe: null };
+    mockReconcileIntent.mockResolvedValue(report);
+
+    await handleStripeEvent(RAW_BODY, SIGNATURE);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(mockAuditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          event: 'RECONCILIATION_DISCREPANCY',
+          intentId: 'intent-recon',
+        }),
+      }),
+    );
+  });
+
+  it('does not throw when reconcileIntent rejects', async () => {
+    mockReconcileIntent.mockRejectedValue(new Error('stripe down'));
+
+    const result = await handleStripeEvent(RAW_BODY, SIGNATURE);
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(result).toEqual({ received: true });
   });
 });
 
