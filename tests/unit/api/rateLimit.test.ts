@@ -359,7 +359,7 @@ describe('Per-route: POST /v1/agent/register (max 3 per IP)', () => {
 
 // ─── Per-route: GET /v1/agent/card/:intentId (max 2) ────────────────────────
 
-describe('Per-route: GET /v1/agent/card/:intentId (max 2 per worker-key:intentId)', () => {
+describe('Per-route: GET /v1/agent/card/:intentId (max 2 per intentId)', () => {
   it('returns 429 after 2 requests with same worker-key and intentId', async () => {
     const ip = '10.4.0.1';
     const responses = await fireRequests('GET', '/v1/agent/card/intent-card-rl', 3, {
