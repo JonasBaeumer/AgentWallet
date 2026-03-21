@@ -46,8 +46,9 @@ export class MockPaymentProvider implements IPaymentProvider {
     this.calls.push({ method: 'cancelCard', args: [intentId], timestamp: Date.now() });
   }
 
-  async handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<void> {
+  async handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>> {
     this.calls.push({ method: 'handleWebhookEvent', args: [rawBody, signature], timestamp: Date.now() });
+    return { received: true };
   }
 
   async getIssuingBalance(currency: string): Promise<IssuingBalance> {

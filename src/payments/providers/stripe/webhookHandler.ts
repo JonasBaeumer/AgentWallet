@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
 
-export async function handleStripeEvent(rawBody: Buffer | string, signature: string): Promise<void> {
+export async function handleStripeEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>> {
   const stripe = getStripeClient();
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) throw new Error('STRIPE_WEBHOOK_SECRET not set');
@@ -19,15 +19,12 @@ export async function handleStripeEvent(rawBody: Buffer | string, signature: str
 
   switch (event.type) {
     case 'issuing_authorization.request': {
-      // MUST respond within 2 seconds — auto-approve in test mode
+      // Return { approved: true } in the response body — the approve/decline
+      // endpoints are deprecated; Stripe now reads the decision from the HTTP
+      // response body within the 2-second window.
       const auth = event.data.object as Stripe.Issuing.Authorization;
-      try {
-        await stripe.issuing.authorizations.approve(auth.id);
-      } catch (err) {
-        console.error(JSON.stringify({ level: 'error', message: 'Failed to approve authorization', error: String(err), intentId }));
-      }
       await logAuditEvent(intentId, 'STRIPE_AUTHORIZATION_REQUEST', { authId: auth.id, amount: auth.amount });
-      break;
+      return { approved: true };
     }
 
     case 'issuing_authorization.created': {
@@ -45,6 +42,8 @@ export async function handleStripeEvent(rawBody: Buffer | string, signature: str
     default:
       console.log(JSON.stringify({ level: 'info', message: 'Unhandled Stripe event', type: event.type }));
   }
+
+  return { received: true };
 }
 
 async function logAuditEvent(intentId: string, eventName: string, payload: Record<string, unknown>): Promise<void> {

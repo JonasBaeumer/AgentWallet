@@ -20,7 +20,7 @@ export interface IPaymentProvider {
   revealCard(intentId: string): Promise<CardReveal>;
   freezeCard(intentId: string): Promise<void>;
   cancelCard(intentId: string): Promise<void>;
-  handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<void>;
+  handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>>;
   getIssuingBalance(currency: string): Promise<IssuingBalance>;
 }
 
