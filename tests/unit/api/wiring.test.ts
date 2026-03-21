@@ -88,7 +88,7 @@ const mockPaymentProvider = {
   revealCard: mockRevealCard,
   freezeCard: jest.fn().mockResolvedValue(undefined),
   cancelCard: mockCancelCard,
-  handleWebhookEvent: jest.fn().mockResolvedValue(undefined),
+  handleWebhookEvent: jest.fn().mockResolvedValue({ received: true }),
   getIssuingBalance: mockGetIssuingBalance,
 };
 jest.mock('@/payments', () => ({

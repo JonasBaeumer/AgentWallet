@@ -87,8 +87,8 @@ describe('MockPaymentProvider', () => {
   });
 
   describe('handleWebhookEvent', () => {
-    it('resolves without error', async () => {
-      await expect(provider.handleWebhookEvent(Buffer.from('{}'), 'sig')).resolves.toBeUndefined();
+    it('resolves with { received: true }', async () => {
+      await expect(provider.handleWebhookEvent(Buffer.from('{}'), 'sig')).resolves.toEqual({ received: true });
     });
 
     it('records the call with raw body and signature', async () => {

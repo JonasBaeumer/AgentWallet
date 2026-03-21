@@ -17,11 +17,9 @@ jest.mock('@/db/client', () => ({
   },
 }));
 
-jest.mock('@/payments/providers/stripe/stripeClient', () => ({
-  getStripeClient: () => ({
-    webhooks: { constructEvent: jest.fn() },
-    issuing: { authorizations: { approve: jest.fn().mockResolvedValue({}) } },
-  }),
+const mockHandleWebhookEvent = jest.fn();
+jest.mock('@/payments', () => ({
+  getPaymentProvider: () => ({ handleWebhookEvent: mockHandleWebhookEvent }),
 }));
 
 import { buildApp } from '@/app';
@@ -38,6 +36,11 @@ afterAll(async () => {
   await app.close();
 });
 
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockHandleWebhookEvent.mockResolvedValue({ received: true });
+});
+
 describe('Stripe webhook endpoint', () => {
   it('400 when stripe-signature header is missing', async () => {
     const res = await app.inject({
@@ -49,7 +52,8 @@ describe('Stripe webhook endpoint', () => {
     expect(JSON.parse(res.body).error).toContain('stripe-signature');
   });
 
-  it('200 with received:true when stripe-signature present', async () => {
+  it('200 with received:true when handleWebhookEvent throws', async () => {
+    mockHandleWebhookEvent.mockRejectedValueOnce(new Error('bad sig'));
     const res = await app.inject({
       method: 'POST', url: '/v1/webhooks/stripe',
       headers: { 'content-type': 'application/json', 'stripe-signature': 'sig-test' },
@@ -57,6 +61,30 @@ describe('Stripe webhook endpoint', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body)).toEqual({ received: true });
+  });
+
+  it('passes response body from handleWebhookEvent to caller', async () => {
+    mockHandleWebhookEvent.mockResolvedValueOnce({ approved: true });
+    const res = await app.inject({
+      method: 'POST', url: '/v1/webhooks/stripe',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig-test' },
+      body: JSON.stringify({}),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ approved: true });
+  });
+
+  it('passes raw body and signature to handleWebhookEvent', async () => {
+    const rawBody = JSON.stringify({ type: 'issuing_authorization.created' });
+    await app.inject({
+      method: 'POST', url: '/v1/webhooks/stripe',
+      headers: { 'content-type': 'application/json', 'stripe-signature': 'sig-abc' },
+      body: rawBody,
+    });
+    expect(mockHandleWebhookEvent).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      'sig-abc',
+    );
   });
 });
 
