@@ -57,12 +57,13 @@ describeIfStripe('Stripe testHelpers authorization flow', () => {
       cardholder: cardholderId,
       currency: 'eur',
       type: 'virtual',
+      status: 'active',
       spending_controls: {
         spending_limits: [{ amount: 10000, interval: 'per_authorization' }],
       },
     });
     cardId = card.id;
-  });
+  }, 30_000);
 
   afterAll(async () => {
     // Cancel the card to clean up

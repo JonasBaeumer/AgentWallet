@@ -28,7 +28,7 @@
  */
 
 import { prisma } from '@/db/client';
-import { getRedisClient } from '@/config/redis';
+import { getRedisClient, disconnectRedis } from '@/config/redis';
 import { issueVirtualCard, revealCard } from '@/payments/providers/stripe/cardService';
 import { runSimulatedCheckout } from '@/payments/providers/stripe/checkoutSimulator';
 import { getStripeClient } from '@/payments/providers/stripe/stripeClient';
@@ -57,7 +57,7 @@ const RUN_ID = Date.now();
 
 afterAll(async () => {
   await prisma.$disconnect();
-  getRedisClient().disconnect();
+  disconnectRedis();
 });
 
 testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
