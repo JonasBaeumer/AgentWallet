@@ -5,7 +5,7 @@ import { getMockBot } from './mockBot';
 let _bot: Bot | null = null;
 
 export function getTelegramBot() {
-  if (env.TELEGRAM_MOCK || process.env.NODE_ENV === 'test') {
+  if (env.TELEGRAM_MOCK) {
     return getMockBot();
   }
   if (!env.TELEGRAM_BOT_TOKEN) {
