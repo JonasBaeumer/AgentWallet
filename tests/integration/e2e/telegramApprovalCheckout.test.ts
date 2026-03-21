@@ -27,7 +27,7 @@
  */
 
 import { prisma } from '@/db/client';
-import { getRedisClient } from '@/config/redis';
+import { getRedisClient, disconnectRedis } from '@/config/redis';
 import { requestApproval, recordDecision } from '@/approval/approvalService';
 import { sendApprovalRequest } from '@/telegram/notificationService';
 import { issueVirtualCard } from '@/payments/providers/stripe/cardService';
@@ -73,7 +73,7 @@ const TEST_CHAT_ID = isMockMode
 // -- Teardown -----------------------------------------------------------------
 afterAll(async () => {
   await prisma.$disconnect();
-  getRedisClient().disconnect();
+  disconnectRedis();
 });
 
 // -- Suite --------------------------------------------------------------------

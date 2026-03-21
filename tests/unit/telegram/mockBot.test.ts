@@ -131,10 +131,7 @@ describe('telegramClient — TELEGRAM_MOCK routing', () => {
     expect(getTelegramMockCalls()).toHaveLength(1);
   });
 
-  it('returns mock bot when TELEGRAM_MOCK=false but NODE_ENV=test (test env always mocks)', () => {
-    // NODE_ENV=test is set by Jest unconditionally — real bot path is unreachable
-    // in any test context regardless of TELEGRAM_MOCK flag. This is intentional:
-    // no test should ever make a real Telegram API call.
+  it('returns real bot when TELEGRAM_MOCK=false and a token is provided', () => {
     jest.doMock('@/config/env', () => ({
       env: {
         TELEGRAM_MOCK: false,
@@ -145,15 +142,11 @@ describe('telegramClient — TELEGRAM_MOCK routing', () => {
     const { getTelegramBot } = require('@/telegram/telegramClient');
     const bot = getTelegramBot();
     expect(bot).toBeDefined();
-    expect(bot.api).toBeDefined();
-    expect(typeof bot.api.sendMessage).toBe('function');
     // Real grammy Bot instances have a .token property — mock does not
-    expect(bot.token).toBeUndefined();
+    expect(bot.token).toBe('fake-token-for-test');
   });
 
-  it('returns mock bot when TELEGRAM_MOCK=false and no token — does not throw in test env', () => {
-    // In NODE_ENV=test the mock short-circuits before the token check,
-    // so missing TELEGRAM_BOT_TOKEN never causes an error in tests.
+  it('throws when TELEGRAM_MOCK=false and no token is configured', () => {
     jest.doMock('@/config/env', () => ({
       env: {
         TELEGRAM_MOCK: false,
@@ -162,8 +155,6 @@ describe('telegramClient — TELEGRAM_MOCK routing', () => {
     }));
 
     const { getTelegramBot } = require('@/telegram/telegramClient');
-    expect(() => getTelegramBot()).not.toThrow();
-    const bot = getTelegramBot();
-    expect(typeof bot.api.sendMessage).toBe('function');
+    expect(() => getTelegramBot()).toThrow('TELEGRAM_BOT_TOKEN is not configured');
   });
 });
