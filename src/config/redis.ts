@@ -10,6 +10,13 @@ export function getRedisClient(): Redis {
   return _redis;
 }
 
+export function disconnectRedis(): void {
+  if (_redis) {
+    _redis.disconnect();
+    _redis = null;
+  }
+}
+
 export function createRedisConnection(): Redis {
   const url = process.env.REDIS_URL || 'redis://localhost:6379';
   return new Redis(url, { maxRetriesPerRequest: null });

@@ -14,7 +14,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/db/client';
-import { getRedisClient } from '@/config/redis';
+import { getRedisClient, disconnectRedis } from '@/config/redis';
 
 // Mock Telegram outbound — we don't send real Telegram messages during tests
 jest.mock('@/telegram/telegramClient', () => ({
@@ -59,7 +59,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close();
   await prisma.$disconnect();
-  getRedisClient().disconnect();
+  disconnectRedis();
 });
 
 beforeEach(async () => {
