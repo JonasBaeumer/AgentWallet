@@ -174,7 +174,7 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     await new Promise((r) => setTimeout(r, 300));
 
     // Bot should have confirmed account creation (message includes API key)
-    expect(mockSendMessage).toHaveBeenLastCalledWith(chatId, expect.stringContaining('Account created'));
+    expect(mockSendMessage).toHaveBeenLastCalledWith(chatId, expect.stringContaining('Account created'), expect.any(Object));
 
     // Verify user exists in DB with correct fields
     const user = await prisma.user.findUnique({ where: { email: testEmail } });
@@ -282,7 +282,7 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
       headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
       payload: { update_id: 2001, message: { message_id: 1, chat: { id: chatId }, text: `/start ${pairingCode}` } },
     });
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
     // User taps Confirm
     await app.inject({
       method: 'POST',
@@ -298,14 +298,15 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
         },
       },
     });
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
     await app.inject({
       method: 'POST',
       url: '/v1/webhooks/telegram',
       headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
       payload: { update_id: 2002, message: { message_id: 2, chat: { id: chatId }, text: 'claimed@example.com' } },
     });
-    await new Promise((r) => setTimeout(r, 100));
+    // Wait for bcrypt.hash + DB transaction to complete (bcrypt cost=10 takes ~200 ms)
+    await new Promise((r) => setTimeout(r, 500));
 
     // Try to renew after claiming — should 409
     const renewRes = await app.inject({
