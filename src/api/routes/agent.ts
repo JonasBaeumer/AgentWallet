@@ -141,9 +141,8 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
         max: 2,
         timeWindow: '1 minute',
         keyGenerator: (req: FastifyRequest) => {
-          const workerKey = req.headers['x-worker-key'] ?? '';
           const intentId = (req.params as { intentId: string }).intentId ?? '';
-          return `${workerKey}:${intentId}`;
+          return `card-reveal:${intentId}`;
         },
       },
     },
