@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/db/client';
 import { getTelegramBot } from './telegramClient';
 import { getSignupSession, setSignupSession, clearSignupSession } from './sessionStore';
+import { sendMainMenu } from './menuHandler';
 
 export async function handleTelegramMessage(update: Update): Promise<void> {
   const message = update.message;
@@ -13,6 +14,12 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
   const chatId = message.chat.id;
   const text = (message.text ?? '').trim();
   const bot = getTelegramBot();
+
+  // Handle /menu command
+  if (text === '/menu') {
+    await sendMainMenu(chatId);
+    return;
+  }
 
   // Handle /start <code> command
   if (text.startsWith('/start')) {
