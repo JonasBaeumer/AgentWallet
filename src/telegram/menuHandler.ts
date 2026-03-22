@@ -238,6 +238,7 @@ async function showTtlPicker(
     .text('24 hrs', 'menu_pref_ttl:1440')
     .row()
     .text('Custom', 'menu_pref_ttl:custom')
+    .row()
     .text('⬅️ Back', 'menu_preferences:_');
 
   await editMenu(bot, chatId, messageId, text, keyboard);
@@ -275,13 +276,18 @@ async function startCustomTtlInput(
   chatId: number | string,
   messageId: number,
 ): Promise<void> {
-  await setPrefSession(chatId, { awaitingCustomTtl: true });
-  await editMenu(
-    bot,
+  // Remove the keyboard from the TTL picker message so it's not left hanging
+  await editMenu(bot, chatId, messageId, '⏱ <b>Custom TTL</b>\n\nType the number of minutes below:');
+  // Send a ForceReply message — Telegram pops up the reply bar anchored to this message
+  const prompt = await bot.api.sendMessage(
     chatId,
-    messageId,
-    '⏱ <b>Custom TTL</b>\n\nEnter the number of minutes to keep the card open:\n(Reply to this chat with a number, e.g. 90)',
+    'How many minutes should the card stay open after checkout? (e.g. 90)',
+    {
+      reply_markup: { force_reply: true, input_field_placeholder: 'e.g. 90' },
+    },
   );
+  // Store both flags in session so signupHandler can delete the prompt after the user replies
+  await setPrefSession(chatId, { awaitingCustomTtl: true, promptMessageId: prompt.message_id });
 }
 
 async function doCancelCard(

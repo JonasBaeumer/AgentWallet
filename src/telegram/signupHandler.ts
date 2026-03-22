@@ -35,6 +35,11 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       where: { telegramChatId: String(chatId) },
       data: { cancelPolicy: CardCancelPolicy.AFTER_TTL, cardTtlMinutes: minutes },
     });
+    // Delete the ForceReply prompt and the user's reply to keep the chat clean
+    if (prefSession.promptMessageId) {
+      await bot.api.deleteMessage(chatId, prefSession.promptMessageId).catch(() => {});
+    }
+    await bot.api.deleteMessage(chatId, message.message_id).catch(() => {});
     await bot.api.sendMessage(chatId, `✅ Saved! Cancel policy: After TTL (${minutes} min)`);
     return;
   }

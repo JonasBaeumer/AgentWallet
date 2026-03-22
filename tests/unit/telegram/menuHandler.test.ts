@@ -436,15 +436,21 @@ describe('menu_pref_ttl', () => {
     expect(text).toContain('60 min');
   });
 
-  it('sets Redis session and shows prompt when custom is selected', async () => {
+  it('sets Redis session, clears keyboard, and sends ForceReply prompt when custom is selected', async () => {
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
       chatId, messageId, 'menu_pref_ttl', 'custom', fromId,
     );
 
-    expect(mockSetPrefSession).toHaveBeenCalledWith(chatId, { awaitingCustomTtl: true });
-    const text = mockEditMessageText.mock.calls[0][2] as string;
-    expect(text.toLowerCase()).toContain('minutes');
+    expect(mockSetPrefSession).toHaveBeenCalledWith(chatId, { awaitingCustomTtl: true, promptMessageId: expect.any(Number) });
+    // Original keyboard message is edited to remove buttons
+    expect(mockEditMessageText).toHaveBeenCalled();
+    // A new ForceReply message is sent
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      chatId,
+      expect.stringContaining('minutes'),
+      expect.objectContaining({ reply_markup: expect.objectContaining({ force_reply: true }) }),
+    );
   });
 });
 
