@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
+import { reconcileIntent } from './reconciliationService';
 
 export async function handleStripeEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>> {
   const stripe = getStripeClient();
@@ -36,6 +37,14 @@ export async function handleStripeEvent(rawBody: Buffer | string, signature: str
     case 'issuing_transaction.created': {
       const txn = event.data.object as Stripe.Issuing.Transaction;
       await logAuditEvent(intentId, 'STRIPE_TRANSACTION_CREATED', { transactionId: txn.id, amount: txn.amount });
+      // Fire-and-forget reconciliation — discrepancy failure must not break webhook
+      reconcileIntent(intentId).then(async (report) => {
+        if (!report.inSync) {
+          await logAuditEvent(intentId, 'RECONCILIATION_DISCREPANCY', { discrepancies: report.discrepancies, report });
+        }
+      }).catch((err) => {
+        console.error(JSON.stringify({ level: 'error', message: 'Reconciliation failed', intentId, error: String(err) }));
+      });
       break;
     }
 
