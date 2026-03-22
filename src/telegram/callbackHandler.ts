@@ -8,6 +8,7 @@ import { markCardIssued, startCheckout } from '@/orchestrator/intentService';
 import { enqueueCheckout } from '@/queue/producers';
 import { getTelegramBot } from './telegramClient';
 import { getSignupSession, setSignupSession, clearSignupSession } from './sessionStore';
+import { handleMenuCallback } from './menuHandler';
 
 export async function handleTelegramCallback(update: Update): Promise<void> {
   const cb = update.callback_query;
@@ -29,6 +30,12 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
   if (colonIdx === -1) return;
   const action = data.slice(0, colonIdx);
   const payload = data.slice(colonIdx + 1);
+
+  // ── Menu callbacks ────────────────────────────────────────────────────────────
+  if (action.startsWith('menu_')) {
+    await handleMenuCallback(bot, chatId!, messageId!, action, payload, fromId);
+    return;
+  }
 
   // ── Agent linking confirmation callbacks ─────────────────────────────────────
   if (action === 'link_confirm' || action === 'link_cancel') {

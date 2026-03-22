@@ -130,7 +130,29 @@ curl -X POST http://localhost:3000/v1/users/<userId>/link-telegram \
 
 Errors: `400` (missing or invalid body), `404` (userId not found — re-run `npm run seed`). No auth required.
 
-### Step 6A — Test it
+### Step 6A — Explore the menu
+
+Once your account is linked, send `/menu` to the bot. You'll see an inline keyboard:
+
+```
+[💰 Balance]       [📋 History]
+[🚫 Cancel Intent] [🔗 Agent Status]
+[⚙️ Preferences]
+```
+
+| Button | What it shows |
+|--------|--------------|
+| 💰 Balance | Main balance, reserved amount, available balance |
+| 📋 History | Last 5 completed purchases |
+| 🚫 Cancel Intent | Active intents you can cancel (tap one to confirm) |
+| 🔗 Agent Status | Which agent is linked to your account |
+| ⚙️ Preferences | Coming soon (card TTL / cancel policy) |
+
+Every screen has a ⬅️ Back button that returns to the main menu.
+
+> If you haven't signed up yet, `/menu` replies with a prompt to run `/start <code>` first.
+
+### Step 7A — Test an approval
 
 ```bash
 # Create an intent (use the userId from Step 5A)
@@ -212,3 +234,5 @@ Once a user is signed up, create an intent and run the stub worker (same as Path
 | `401` on webhook endpoint | Wrong `TELEGRAM_WEBHOOK_SECRET` | Ensure `.env` value matches the `secret_token` in Step 4 |
 | ngrok auth error | No authtoken configured | Run `ngrok config add-authtoken <token>` |
 | `POST /v1/users/:userId/link-telegram` returns 404 | userId is wrong or DB was reset | Re-run `npm run seed` and use the printed userId |
+| `/menu` gives no response | Webhook not registered or server not running | Re-run Step 4; ensure `npm run dev` is running |
+| `/menu` says "sign up first" | No account linked to your chat ID | Run `npm run seed` (with `TELEGRAM_TEST_CHAT_ID` set) or complete the `/start <code>` flow |
