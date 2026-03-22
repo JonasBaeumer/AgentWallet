@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
 import { reconcileIntent } from './reconciliationService';
+import { getPaymentProvider } from '@/payments';
 
 export async function handleStripeEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>> {
   const stripe = getStripeClient();
@@ -37,6 +38,18 @@ export async function handleStripeEvent(rawBody: Buffer | string, signature: str
     case 'issuing_transaction.created': {
       const txn = event.data.object as Stripe.Issuing.Transaction;
       await logAuditEvent(intentId, 'STRIPE_TRANSACTION_CREATED', { transactionId: txn.id, amount: txn.amount });
+
+      // ON_TRANSACTION policy: cancel card now that money has settled
+      const intentForPolicy = await prisma.purchaseIntent.findUnique({
+        where: { id: intentId },
+        include: { user: { select: { cancelPolicy: true } } },
+      });
+      if (intentForPolicy?.user?.cancelPolicy === 'ON_TRANSACTION') {
+        getPaymentProvider().cancelCard(intentId).catch((err) => {
+          console.error(JSON.stringify({ level: 'error', message: 'ON_TRANSACTION card cancel failed', intentId, error: String(err) }));
+        });
+      }
+
       // Fire-and-forget reconciliation — discrepancy failure must not break webhook
       reconcileIntent(intentId).then(async (report) => {
         if (!report.inSync) {

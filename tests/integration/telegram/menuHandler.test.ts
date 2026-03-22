@@ -362,13 +362,20 @@ testSuite('Telegram /menu integration (real DB)', () => {
   // ── menu_preferences ────────────────────────────────────────────────────────
 
   describe('menu_preferences callback', () => {
-    it('shows the coming soon stub', async () => {
+    it('shows current policy and policy picker buttons', async () => {
       await createTestUser();
 
       await sendMenuCallback('menu_preferences', '_');
 
-      const [, , text] = mockEditMessageText.mock.calls[0];
-      expect(text.toLowerCase()).toContain('coming soon');
+      const [, , text, opts] = mockEditMessageText.mock.calls[0];
+      expect(text.toLowerCase()).toContain('cancel policy');
+
+      const buttons = opts.reply_markup.inline_keyboard.flat();
+      const actions = buttons.map((b: any) => b.callback_data);
+      expect(actions).toContain('menu_pref_policy:ON_TRANSACTION');
+      expect(actions).toContain('menu_pref_policy:IMMEDIATE');
+      expect(actions).toContain('menu_pref_policy:AFTER_TTL');
+      expect(actions).toContain('menu_pref_policy:MANUAL');
     });
   });
 
@@ -421,6 +428,121 @@ testSuite('Telegram /menu integration (real DB)', () => {
 
       const [, , text] = mockEditMessageText.mock.calls[0];
       expect(text.toLowerCase()).toContain('sign up');
+    });
+  });
+
+  // ── menu_pref_policy (integration) ──────────────────────────────────────────
+
+  describe('menu_pref_policy callback', () => {
+    it('saves IMMEDIATE policy to DB', async () => {
+      const user = await createTestUser();
+
+      await sendMenuCallback('menu_pref_policy', 'IMMEDIATE');
+
+      const updated = await prisma.user.findUnique({ where: { id: user.id } });
+      expect(updated!.cancelPolicy).toBe('IMMEDIATE');
+
+      const [, , text] = mockEditMessageText.mock.calls[0];
+      expect(text.toLowerCase()).toContain('saved');
+    });
+
+    it('shows TTL picker when AFTER_TTL is tapped', async () => {
+      await createTestUser();
+
+      await sendMenuCallback('menu_pref_policy', 'AFTER_TTL');
+
+      const [, , , opts] = mockEditMessageText.mock.calls[0];
+      const buttons = opts.reply_markup.inline_keyboard.flat();
+      const actions = buttons.map((b: any) => b.callback_data);
+      expect(actions).toContain('menu_pref_ttl:30');
+      expect(actions).toContain('menu_pref_ttl:custom');
+    });
+  });
+
+  // ── menu_pref_ttl (integration) ─────────────────────────────────────────────
+
+  describe('menu_pref_ttl callback', () => {
+    it('saves AFTER_TTL with preset TTL to DB', async () => {
+      const user = await createTestUser();
+
+      await sendMenuCallback('menu_pref_ttl', '240');
+
+      const updated = await prisma.user.findUnique({ where: { id: user.id } });
+      expect(updated!.cancelPolicy).toBe('AFTER_TTL');
+      expect(updated!.cardTtlMinutes).toBe(240);
+
+      const [, , text] = mockEditMessageText.mock.calls[0];
+      expect(text).toContain('240 min');
+    });
+  });
+
+  // ── PATCH /v1/users/:userId/preferences ─────────────────────────────────────
+
+  describe('PATCH /v1/users/:userId/preferences', () => {
+    it('updates cancelPolicy and returns the new values', async () => {
+      const user = await createTestUser();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/users/${user.id}/preferences`,
+        payload: { cancelPolicy: 'MANUAL' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.cancelPolicy).toBe('MANUAL');
+
+      const updated = await prisma.user.findUnique({ where: { id: user.id } });
+      expect(updated!.cancelPolicy).toBe('MANUAL');
+    });
+
+    it('updates AFTER_TTL policy with cardTtlMinutes', async () => {
+      const user = await createTestUser();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/users/${user.id}/preferences`,
+        payload: { cancelPolicy: 'AFTER_TTL', cardTtlMinutes: 120 },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.cancelPolicy).toBe('AFTER_TTL');
+      expect(body.cardTtlMinutes).toBe(120);
+    });
+
+    it('returns 400 when cardTtlMinutes is set without AFTER_TTL policy', async () => {
+      const user = await createTestUser();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/users/${user.id}/preferences`,
+        payload: { cancelPolicy: 'IMMEDIATE', cardTtlMinutes: 60 },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 400 for unknown cancelPolicy', async () => {
+      const user = await createTestUser();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/users/${user.id}/preferences`,
+        payload: { cancelPolicy: 'INVALID_POLICY' },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 404 for unknown userId', async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/v1/users/nonexistent-user-id/preferences',
+        payload: { cancelPolicy: 'IMMEDIATE' },
+      });
+
+      expect(res.statusCode).toBe(404);
     });
   });
 });

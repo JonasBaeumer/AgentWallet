@@ -2,7 +2,16 @@ import { InlineKeyboard } from 'grammy';
 import { prisma } from '@/db/client';
 import { getTelegramBot } from './telegramClient';
 import { expireIntent } from '@/orchestrator/intentService';
-import { IntentStatus } from '@/contracts';
+import { getPaymentProvider } from '@/payments';
+import { IntentStatus, CardCancelPolicy } from '@/contracts';
+import { setPrefSession } from './sessionStore';
+
+const POLICY_LABELS: Record<CardCancelPolicy, string> = {
+  [CardCancelPolicy.ON_TRANSACTION]: 'On Transaction',
+  [CardCancelPolicy.IMMEDIATE]: 'Immediate',
+  [CardCancelPolicy.AFTER_TTL]: 'After TTL',
+  [CardCancelPolicy.MANUAL]: 'Manual',
+};
 
 const ACTIVE_INTENT_STATUSES: IntentStatus[] = [
   IntentStatus.RECEIVED,
@@ -192,11 +201,109 @@ async function showPreferences(
   bot: ReturnType<typeof getTelegramBot>,
   chatId: number | string,
   messageId: number,
+  user: { cancelPolicy: CardCancelPolicy; cardTtlMinutes: number | null },
 ): Promise<void> {
+  const currentLabel = POLICY_LABELS[user.cancelPolicy];
+  const ttlSuffix = user.cancelPolicy === CardCancelPolicy.AFTER_TTL && user.cardTtlMinutes
+    ? ` (${user.cardTtlMinutes} min)`
+    : '';
+
   const text =
-    '⚙️ <b>Preferences</b> — coming soon.\n\nCard TTL and cancel policy settings will be available here.';
-  const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_main:_');
+    `⚙️ <b>Preferences</b>\n\nCancel policy: <b>${currentLabel}${ttlSuffix}</b>\n\n` +
+    `Choose when the virtual card is cancelled after a successful checkout:`;
+
+  const keyboard = new InlineKeyboard()
+    .text('On Transaction', 'menu_pref_policy:ON_TRANSACTION')
+    .text('Immediate', 'menu_pref_policy:IMMEDIATE')
+    .row()
+    .text('After TTL', 'menu_pref_policy:AFTER_TTL')
+    .text('Manual', 'menu_pref_policy:MANUAL')
+    .row()
+    .text('⬅️ Back', 'menu_main:_');
+
   await editMenu(bot, chatId, messageId, text, keyboard);
+}
+
+async function showTtlPicker(
+  bot: ReturnType<typeof getTelegramBot>,
+  chatId: number | string,
+  messageId: number,
+): Promise<void> {
+  const text = '⏱ <b>Card TTL</b> — how long to keep the card open after checkout?';
+  const keyboard = new InlineKeyboard()
+    .text('30 min', 'menu_pref_ttl:30')
+    .text('1 hr', 'menu_pref_ttl:60')
+    .row()
+    .text('4 hrs', 'menu_pref_ttl:240')
+    .text('24 hrs', 'menu_pref_ttl:1440')
+    .row()
+    .text('Custom', 'menu_pref_ttl:custom')
+    .row()
+    .text('⬅️ Back', 'menu_preferences:_');
+
+  await editMenu(bot, chatId, messageId, text, keyboard);
+}
+
+async function savePrefPolicy(
+  bot: ReturnType<typeof getTelegramBot>,
+  chatId: number | string,
+  messageId: number,
+  userId: string,
+  policy: CardCancelPolicy,
+): Promise<void> {
+  await prisma.user.update({ where: { id: userId }, data: { cancelPolicy: policy } });
+  const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
+  await editMenu(bot, chatId, messageId, `✅ Saved! Cancel policy: <b>${POLICY_LABELS[policy]}</b>`, keyboard);
+}
+
+async function savePrefTtl(
+  bot: ReturnType<typeof getTelegramBot>,
+  chatId: number | string,
+  messageId: number,
+  userId: string,
+  minutes: number,
+): Promise<void> {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { cancelPolicy: CardCancelPolicy.AFTER_TTL, cardTtlMinutes: minutes },
+  });
+  const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
+  await editMenu(bot, chatId, messageId, `✅ Saved! Cancel policy: <b>After TTL (${minutes} min)</b>`, keyboard);
+}
+
+async function startCustomTtlInput(
+  bot: ReturnType<typeof getTelegramBot>,
+  chatId: number | string,
+  messageId: number,
+): Promise<void> {
+  // Remove the keyboard from the TTL picker message so it's not left hanging
+  await editMenu(bot, chatId, messageId, '⏱ <b>Custom TTL</b>\n\nType the number of minutes below:');
+  // Send a ForceReply message — Telegram pops up the reply bar anchored to this message
+  const prompt = await bot.api.sendMessage(
+    chatId,
+    'How many minutes should the card stay open after checkout? (e.g. 90)',
+    {
+      reply_markup: { force_reply: true, input_field_placeholder: 'e.g. 90' },
+    },
+  );
+  // Store both flags in session so signupHandler can delete the prompt after the user replies
+  await setPrefSession(chatId, { awaitingCustomTtl: true, promptMessageId: prompt.message_id });
+}
+
+async function doCancelCard(
+  bot: ReturnType<typeof getTelegramBot>,
+  chatId: number | string,
+  messageId: number,
+  intentId: string,
+): Promise<void> {
+  try {
+    await getPaymentProvider().cancelCard(intentId);
+    const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
+    await editMenu(bot, chatId, messageId, '✅ Card cancelled successfully.', keyboard);
+  } catch {
+    const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
+    await editMenu(bot, chatId, messageId, '⚠️ Something went wrong cancelling the card. Please try again.', keyboard);
+  }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -236,11 +343,6 @@ export async function handleMenuCallback(
     return;
   }
 
-  if (action === 'menu_preferences') {
-    await showPreferences(bot, chatId, messageId);
-    return;
-  }
-
   if (action === 'menu_cancel_confirm') {
     await showCancelConfirm(bot, chatId, messageId, payload);
     return;
@@ -251,7 +353,17 @@ export async function handleMenuCallback(
     return;
   }
 
-  // Actions that need a user record — look up by fromTelegramId (same as chatId for private chats)
+  if (action === 'menu_card_cancel') {
+    await doCancelCard(bot, chatId, messageId, payload);
+    return;
+  }
+
+  if (action === 'menu_pref_ttl' && payload === 'custom') {
+    await startCustomTtlInput(bot, chatId, messageId);
+    return;
+  }
+
+  // All remaining actions need a user record
   const user = await getUserByChatId(chatId);
 
   if (!user) {
@@ -273,6 +385,18 @@ export async function handleMenuCallback(
       await showCancelList(bot, chatId, messageId, user);
     } else if (action === 'menu_agent') {
       await showAgentStatus(bot, chatId, messageId, user);
+    } else if (action === 'menu_preferences') {
+      await showPreferences(bot, chatId, messageId, user);
+    } else if (action === 'menu_pref_policy') {
+      const policy = payload as CardCancelPolicy;
+      if (policy === CardCancelPolicy.AFTER_TTL) {
+        await showTtlPicker(bot, chatId, messageId);
+      } else {
+        await savePrefPolicy(bot, chatId, messageId, user.id, policy);
+      }
+    } else if (action === 'menu_pref_ttl') {
+      const minutes = parseInt(payload, 10);
+      await savePrefTtl(bot, chatId, messageId, user.id, minutes);
     }
     // Unknown menu_* actions: silently ignore (no crash)
   } catch {

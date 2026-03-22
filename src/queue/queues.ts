@@ -20,3 +20,13 @@ export const checkoutQueue = new Queue('checkout-queue', {
     removeOnFail: 200,
   },
 });
+
+export const cancelCardQueue = new Queue('cancel-card-queue', {
+  connection: getRedisConnectionConfig(),
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: 100,
+    removeOnFail: 200,
+  },
+});

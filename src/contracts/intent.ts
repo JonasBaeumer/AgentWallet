@@ -1,6 +1,7 @@
-import { IntentStatus as PrismaIntentStatus } from '@prisma/client';
+import { IntentStatus as PrismaIntentStatus, CardCancelPolicy as PrismaCardCancelPolicy } from '@prisma/client';
 
 export { PrismaIntentStatus as IntentStatus };
+export { PrismaCardCancelPolicy as CardCancelPolicy };
 
 export enum IntentEvent {
   INTENT_CREATED = 'INTENT_CREATED',

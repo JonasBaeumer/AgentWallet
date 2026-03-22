@@ -42,6 +42,9 @@ jest.mock('@/telegram/sessionStore', () => ({
   getSignupSession: (...args: any[]) => mockGetSession(...args),
   setSignupSession: (...args: any[]) => mockSetSession(...args),
   clearSignupSession: (...args: any[]) => mockClearSession(...args),
+  getPrefSession: jest.fn().mockResolvedValue(null),
+  setPrefSession: jest.fn(),
+  clearPrefSession: jest.fn(),
 }));
 
 import { handleTelegramMessage } from '@/telegram/signupHandler';

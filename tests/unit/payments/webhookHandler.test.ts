@@ -8,8 +8,18 @@ jest.mock('@/payments/providers/stripe/stripeClient', () => ({
 }));
 
 const mockAuditCreate = jest.fn().mockResolvedValue({});
+const mockIntentFindUnique = jest.fn().mockResolvedValue(null);
 jest.mock('@/db/client', () => ({
-  prisma: { auditEvent: { create: mockAuditCreate } },
+  prisma: {
+    auditEvent: { create: mockAuditCreate },
+    purchaseIntent: { findUnique: (...args: any[]) => mockIntentFindUnique(...args) },
+  },
+}));
+
+// Mock payment provider for ON_TRANSACTION cancel
+const mockCancelCard = jest.fn().mockResolvedValue(undefined);
+jest.mock('@/payments', () => ({
+  getPaymentProvider: () => ({ cancelCard: mockCancelCard }),
 }));
 
 const mockReconcileIntent = jest.fn();

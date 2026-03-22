@@ -3,6 +3,9 @@ import { IntentEvent, PurchaseIntentData, AuditEventData, IntentNotFoundError } 
 import { transitionIntent, TransitionResult } from './stateMachine';
 import { getPaymentProvider } from '@/payments';
 import { returnIntent } from '@/ledger/potService';
+import { enqueueCancelCard } from '@/queue/producers';
+import { getTelegramBot } from '@/telegram/telegramClient';
+import { InlineKeyboard } from 'grammy';
 
 export async function getIntentWithHistory(intentId: string): Promise<{
   intent: PurchaseIntentData;
@@ -55,7 +58,61 @@ export async function startCheckout(intentId: string): Promise<TransitionResult>
 }
 
 export async function completeCheckout(intentId: string, actualAmount: number): Promise<TransitionResult> {
-  return transitionIntent(intentId, IntentEvent.CHECKOUT_SUCCEEDED, { actualAmount });
+  const result = await transitionIntent(intentId, IntentEvent.CHECKOUT_SUCCEEDED, { actualAmount });
+
+  // Apply cancel policy — fire-and-forget so policy errors never block the checkout response
+  applyPostCheckoutCancelPolicy(intentId).catch((err) => {
+    console.error(JSON.stringify({ level: 'error', message: 'Post-checkout cancel policy failed', intentId, error: String(err) }));
+  });
+
+  return result;
+}
+
+async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
+  const intent = await prisma.purchaseIntent.findUnique({
+    where: { id: intentId },
+    include: { user: { select: { cancelPolicy: true, cardTtlMinutes: true, telegramChatId: true } }, virtualCard: true },
+  });
+  if (!intent?.user) return;
+
+  const { cancelPolicy, cardTtlMinutes, telegramChatId } = intent.user;
+
+  if (cancelPolicy === 'ON_TRANSACTION') {
+    // Cancellation is handled by the issuing_transaction.created Stripe webhook.
+    // Fallback for stub/test flows where no real Stripe transaction fires:
+    if (!intent.virtualCard) {
+      await getPaymentProvider().cancelCard(intentId).catch((err) => {
+        console.error(JSON.stringify({ level: 'error', message: 'ON_TRANSACTION stub fallback cancel failed', intentId, error: String(err) }));
+      });
+    }
+  } else if (cancelPolicy === 'IMMEDIATE') {
+    await getPaymentProvider().cancelCard(intentId).catch((err) => {
+      console.error(JSON.stringify({ level: 'error', message: 'IMMEDIATE card cancel failed', intentId, error: String(err) }));
+    });
+  } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes) {
+    await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
+  } else if (cancelPolicy === 'MANUAL') {
+    await getPaymentProvider().freezeCard(intentId).catch((err) => {
+      console.error(JSON.stringify({ level: 'error', message: 'MANUAL card freeze failed', intentId, error: String(err) }));
+    });
+    if (telegramChatId) {
+      await notifyManualCardPending(telegramChatId, intentId, intent.subject ?? intent.query);
+    }
+  }
+}
+
+async function notifyManualCardPending(telegramChatId: string, intentId: string, label: string): Promise<void> {
+  try {
+    const bot = getTelegramBot();
+    const keyboard = new InlineKeyboard().text('Cancel Card Now', `menu_card_cancel:${intentId}`);
+    await bot.api.sendMessage(
+      Number(telegramChatId),
+      `Checkout complete for "${label}".\n\nYour virtual card is frozen. Tap below when you no longer need it.`,
+      { reply_markup: keyboard },
+    );
+  } catch (err) {
+    console.error(JSON.stringify({ level: 'error', message: 'Failed to send MANUAL card notification', intentId, error: String(err) }));
+  }
 }
 
 export async function failCheckout(intentId: string, errorMessage: string): Promise<TransitionResult> {

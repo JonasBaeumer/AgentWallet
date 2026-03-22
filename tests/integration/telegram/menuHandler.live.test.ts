@@ -147,7 +147,11 @@ async function waitForCallback(
       const action = cb.data.slice(0, colonIdx);
       const payload = cb.data.slice(colonIdx + 1);
 
-      if (allowed.includes(action)) {
+      const matches = allowed.some((a) =>
+        a.includes(':') ? cb.data === a : action === a,
+      );
+
+      if (matches) {
         return {
           action,
           payload,
@@ -156,11 +160,11 @@ async function waitForCallback(
         };
       }
 
-      // Unexpected button — acknowledge it and keep waiting
+      // Wrong button — alert user and keep waiting
       await tgPost('answerCallbackQuery', {
         callback_query_id: cb.id,
-        text: `Expected one of: ${allowed.join(', ')}`,
-        show_alert: false,
+        text: `⚠️ Please tap: ${allowed.join(' or ')}`,
+        show_alert: true,
       });
     }
   }
@@ -421,7 +425,7 @@ testSuite('Telegram /menu — interactive live walkthrough', () => {
     console.log('✓ Agent status shown — expect: Linked: live-agent-001');
   });
 
-  // ── Step 9: Preferences stub ────────────────────────────────────────────────
+  // ── Step 9: Preferences screen ──────────────────────────────────────────────
 
   it('Step 9 — Preferences screen (tap ⬅️ Back, then ⚙️ Preferences)', async () => {
     await instruct('👆 Tap <b>[⬅️ Back]</b>, then tap <b>[⚙️ Preferences]</b>.');
@@ -435,7 +439,7 @@ testSuite('Telegram /menu — interactive live walkthrough', () => {
     console.log(`\nReceived tap: ${cb.action}`);
 
     await forwardCallback(cb);
-    console.log('✓ Preferences stub shown — expect: coming soon');
+    console.log('✓ Preferences shown — expect: policy picker with On Transaction / Immediate / After TTL / Manual buttons');
   });
 
   // ── Step 10: Return to main ──────────────────────────────────────────────────
