@@ -1,7 +1,7 @@
 // Mock prisma before imports
 jest.mock('@/db/client', () => ({
   prisma: {
-    user: { findFirst: jest.fn() },
+    user: { findFirst: jest.fn(), update: jest.fn() },
     pot: { findMany: jest.fn() },
     purchaseIntent: { findMany: jest.fn(), findUnique: jest.fn() },
   },
@@ -22,6 +22,24 @@ jest.mock('@/orchestrator/intentService', () => ({
   expireIntent: (...args: any[]) => mockExpireIntent(...args),
 }));
 
+// Mock payment provider
+const mockCancelCard = jest.fn();
+const mockFreezeCard = jest.fn();
+jest.mock('@/payments', () => ({
+  getPaymentProvider: () => ({ cancelCard: mockCancelCard, freezeCard: mockFreezeCard }),
+}));
+
+// Mock sessionStore
+const mockSetPrefSession = jest.fn();
+jest.mock('@/telegram/sessionStore', () => ({
+  setPrefSession: (...args: any[]) => mockSetPrefSession(...args),
+  getPrefSession: jest.fn(),
+  clearPrefSession: jest.fn(),
+  getSignupSession: jest.fn(),
+  setSignupSession: jest.fn(),
+  clearSignupSession: jest.fn(),
+}));
+
 import { sendMainMenu, handleMenuCallback } from '@/telegram/menuHandler';
 import { prisma } from '@/db/client';
 
@@ -36,12 +54,18 @@ const baseUser = {
   email: 'alice@example.com',
   agentId: 'agent-xyz123',
   mainBalance: 12500, // £125.00
+  cancelPolicy: 'ON_TRANSACTION' as const,
+  cardTtlMinutes: null,
 };
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockEditMessageText.mockResolvedValue({});
   mockSendMessage.mockResolvedValue({ message_id: 99 });
+  mockCancelCard.mockResolvedValue(undefined);
+  mockFreezeCard.mockResolvedValue(undefined);
+  mockSetPrefSession.mockResolvedValue(undefined);
+  (mockPrisma.user.update as jest.Mock).mockResolvedValue({});
 });
 
 // ── sendMainMenu ──────────────────────────────────────────────────────────────
@@ -337,7 +361,9 @@ describe('menu_agent', () => {
 // ── menu_preferences ─────────────────────────────────────────────────────────
 
 describe('menu_preferences', () => {
-  it('shows coming soon stub', async () => {
+  it('shows current policy and policy picker buttons', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
       chatId,
@@ -348,7 +374,104 @@ describe('menu_preferences', () => {
     );
 
     const text = mockEditMessageText.mock.calls[0][2] as string;
-    expect(text.toLowerCase()).toContain('coming soon');
+    expect(text.toLowerCase()).toContain('cancel policy');
+
+    const opts = mockEditMessageText.mock.calls[0][3];
+    const buttons = opts.reply_markup.inline_keyboard.flat();
+    const actions = buttons.map((b: any) => b.callback_data);
+    expect(actions).toContain('menu_pref_policy:ON_TRANSACTION');
+    expect(actions).toContain('menu_pref_policy:AFTER_TTL');
+  });
+});
+
+// ── menu_pref_policy ─────────────────────────────────────────────────────────
+
+describe('menu_pref_policy', () => {
+  it('saves IMMEDIATE policy and shows confirmation', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId, messageId, 'menu_pref_policy', 'IMMEDIATE', fromId,
+    );
+
+    expect(mockPrisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { cancelPolicy: 'IMMEDIATE' },
+    }));
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text.toLowerCase()).toContain('saved');
+  });
+
+  it('shows TTL picker when AFTER_TTL is selected', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId, messageId, 'menu_pref_policy', 'AFTER_TTL', fromId,
+    );
+
+    const opts = mockEditMessageText.mock.calls[0][3];
+    const buttons = opts.reply_markup.inline_keyboard.flat();
+    const actions = buttons.map((b: any) => b.callback_data);
+    expect(actions).toContain('menu_pref_ttl:30');
+    expect(actions).toContain('menu_pref_ttl:custom');
+  });
+});
+
+// ── menu_pref_ttl ─────────────────────────────────────────────────────────────
+
+describe('menu_pref_ttl', () => {
+  it('saves AFTER_TTL policy with preset minutes and confirms', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId, messageId, 'menu_pref_ttl', '60', fromId,
+    );
+
+    expect(mockPrisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { cancelPolicy: 'AFTER_TTL', cardTtlMinutes: 60 },
+    }));
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text).toContain('60 min');
+  });
+
+  it('sets Redis session and shows prompt when custom is selected', async () => {
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId, messageId, 'menu_pref_ttl', 'custom', fromId,
+    );
+
+    expect(mockSetPrefSession).toHaveBeenCalledWith(chatId, { awaitingCustomTtl: true });
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text.toLowerCase()).toContain('minutes');
+  });
+});
+
+// ── menu_card_cancel ──────────────────────────────────────────────────────────
+
+describe('menu_card_cancel', () => {
+  it('calls cancelCard and confirms', async () => {
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId, messageId, 'menu_card_cancel', 'intent-abc', fromId,
+    );
+
+    expect(mockCancelCard).toHaveBeenCalledWith('intent-abc');
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text.toLowerCase()).toContain('cancelled');
+  });
+
+  it('shows error message when cancelCard throws', async () => {
+    mockCancelCard.mockRejectedValue(new Error('Stripe error'));
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId, messageId, 'menu_card_cancel', 'intent-abc', fromId,
+    );
+
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text.toLowerCase()).toContain('went wrong');
   });
 });
 

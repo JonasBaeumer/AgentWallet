@@ -38,6 +38,13 @@ enum ApprovalDecisionType {
   DENIED
 }
 
+enum CardCancelPolicy {
+  ON_TRANSACTION
+  IMMEDIATE
+  AFTER_TTL
+  MANUAL
+}
+
 model User {
   id                  String          @id @default(cuid())
   email               String          @unique
@@ -51,6 +58,8 @@ model User {
   agentId             String?         @unique
   apiKeyHash          String?
   apiKeyPrefix        String?         @unique
+  cancelPolicy        CardCancelPolicy @default(ON_TRANSACTION)
+  cardTtlMinutes      Int?
   createdAt           DateTime        @default(now())
 
   intents             PurchaseIntent[]

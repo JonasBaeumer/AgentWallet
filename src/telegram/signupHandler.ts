@@ -4,8 +4,9 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/db/client';
 import { getTelegramBot } from './telegramClient';
-import { getSignupSession, setSignupSession, clearSignupSession } from './sessionStore';
+import { getSignupSession, setSignupSession, clearSignupSession, getPrefSession, clearPrefSession } from './sessionStore';
 import { sendMainMenu } from './menuHandler';
+import { CardCancelPolicy } from '@/contracts';
 
 export async function handleTelegramMessage(update: Update): Promise<void> {
   const message = update.message;
@@ -18,6 +19,23 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
   // Handle /menu command
   if (text === '/menu') {
     await sendMainMenu(chatId);
+    return;
+  }
+
+  // Handle custom TTL input (set by menu_pref_ttl:custom)
+  const prefSession = await getPrefSession(chatId);
+  if (prefSession?.awaitingCustomTtl) {
+    const minutes = parseInt(text, 10);
+    if (isNaN(minutes) || minutes < 1 || minutes > 10080) {
+      await bot.api.sendMessage(chatId, '⚠️ Please send a whole number of minutes between 1 and 10080, e.g. 90');
+      return;
+    }
+    await clearPrefSession(chatId);
+    await prisma.user.updateMany({
+      where: { telegramChatId: String(chatId) },
+      data: { cancelPolicy: CardCancelPolicy.AFTER_TTL, cardTtlMinutes: minutes },
+    });
+    await bot.api.sendMessage(chatId, `✅ Saved! Cancel policy: After TTL (${minutes} min)`);
     return;
   }
 

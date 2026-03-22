@@ -1,8 +1,22 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 import { userAuthMiddleware } from '@/api/middleware/userAuth';
 import { prisma } from '@/db/client';
 import { expireIntent } from '@/orchestrator/intentService';
-import { IntentStatus } from '@/contracts';
+import { IntentStatus, CardCancelPolicy } from '@/contracts';
+
+const PreferencesSchema = z.object({
+  cancelPolicy: z.nativeEnum(CardCancelPolicy).optional(),
+  cardTtlMinutes: z.number().int().min(1).max(10080).nullable().optional(),
+}).superRefine((data, ctx) => {
+  if (data.cardTtlMinutes != null && data.cancelPolicy !== CardCancelPolicy.AFTER_TTL) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'cardTtlMinutes can only be set when cancelPolicy is AFTER_TTL',
+      path: ['cardTtlMinutes'],
+    });
+  }
+});
 
 const ACTIVE_INTENT_STATUSES: IntentStatus[] = [
   IntentStatus.RECEIVED,
@@ -89,5 +103,35 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     return reply.send({ unlinked: true, agentId, cancelledIntentIds });
+  });
+
+  // PATCH /v1/users/:userId/preferences
+  // Update cancel policy and optional TTL. No auth required (internal/Telegram use).
+  fastify.patch('/v1/users/:userId/preferences', async (
+    request: FastifyRequest<{ Params: { userId: string } }>,
+    reply: FastifyReply,
+  ) => {
+    const { userId } = request.params;
+
+    const parsed = PreferencesSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return reply.status(404).send({ error: 'User not found' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: parsed.data,
+    });
+
+    return reply.send({
+      userId: updated.id,
+      cancelPolicy: updated.cancelPolicy,
+      cardTtlMinutes: updated.cardTtlMinutes,
+    });
   });
 }
