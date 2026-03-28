@@ -11,7 +11,7 @@ metadata:
 
 You complete purchases for the user through the Tranzact payment API. The user approves every purchase via Telegram before any charge occurs. The backend issues a one-time virtual card — you reveal the card credentials once, use them to checkout on the merchant site, then the card is cancelled.
 
-**Important:** This skill involves a background wait for user approval. You will yield your session and be woken up by a system event. When you wake up, you **must resume on the same session and channel** where the user originally made the purchase request — do not start a new conversation.
+**Important:** This skill involves a background wait for user approval. You will yield your session and be woken up by a system event. When you wake up, you **must resume on the same session and channel** where the user originally made the purchase request — do not start a new conversation. Proactively notify the user on wake up.
 
 ## Pre-flight: Environment Check
 
@@ -239,15 +239,6 @@ The event payload is:
 
 The `checkout.amount` is the quote price you submitted. This is the spending limit on the virtual card.
 
-#### Decision API reference (used by the script, not by you directly)
-
-```
-GET {TRANZACT_BASE_URL}/v1/agent/decision/<intentId>
-X-Worker-Key: <TRANZACT_WORKER_KEY>
-```
-
-Response statuses: `AWAITING_APPROVAL`, `APPROVED`, `DENIED`.
-
 ### Step 5 — Reveal Card Credentials
 
 Once approved, retrieve the virtual card details. **This endpoint can only be called once per intent.**
@@ -274,10 +265,11 @@ Response (`200`, first call only):
 | `200` | Card credentials returned. **This is your only chance** — a second call returns `409`. |
 | `404` | No card found for this intent (card not yet issued, or invalid intentId). |
 | `409` | Card already revealed. You cannot retrieve credentials again. |
+| `429` | Rate limited — wait at least 60 seconds before retrying. |
 
 **Hold the card details in memory only.** Never log, store to disk, or persist the full card number or CVC.
 
-Rate limit: 2 requests per minute per intentId.
+Rate limit: 2 requests per minute per intentId. A `429` does **not** consume your one-time reveal — safe to retry after 60 seconds.
 
 ### Step 6 — Complete Checkout on Merchant Site
 
@@ -327,7 +319,7 @@ Failure:
 |-------|----------|-------|
 | `intentId` | Yes | |
 | `success` | Yes | `true` or `false` |
-| `actualAmount` | No | Amount actually charged, smallest currency unit. May differ from quoted price. |
+| `actualAmount` | **Yes** when `success: true` | Amount actually charged, smallest currency unit. May differ from quoted price. **Must be provided on success**. |
 | `receiptUrl` | No | Order confirmation URL if available. Omit if none. |
 | `errorMessage` | No | Reason for failure. Include on `success: false`. |
 

@@ -79,9 +79,9 @@ def poll() -> int:
     for i in range(MAX_POLLS):
         try:
             r = requests.get(url, headers=headers, timeout=10)
-            consecutive_errors = 0  # reset on any successful HTTP response
 
             if r.status_code == 200:
+                consecutive_errors = 0
                 data = r.json()
                 status = data.get("status")
 
@@ -93,7 +93,20 @@ def poll() -> int:
                     wake_agent({"status": "DENIED", "intentId": INTENT_ID})
                     return 1
 
-                # AWAITING_APPROVAL or transitional — keep polling
+                elif status == "EXPIRED":
+                    wake_agent({"status": "ERROR", "intentId": INTENT_ID, "error": "Intent expired"})
+                    return 3
+
+                elif status == "FAILED":
+                    wake_agent({"status": "ERROR", "intentId": INTENT_ID, "error": "Intent failed"})
+                    return 3
+
+                elif status == "AWAITING_APPROVAL":
+                    pass  # keep polling
+
+                else:
+                    wake_agent({"status": "ERROR", "intentId": INTENT_ID, "error": f"Unexpected status: {status}"})
+                    return 3
 
             elif r.status_code == 404:
                 wake_agent({"status": "ERROR", "intentId": INTENT_ID, "error": "Intent not found"})
@@ -102,6 +115,37 @@ def poll() -> int:
             elif r.status_code == 401:
                 wake_agent({"status": "ERROR", "intentId": INTENT_ID, "error": "Authentication failed (401)"})
                 return 3
+
+            elif r.status_code == 429:
+                consecutive_errors += 1
+                retry_after = int(r.headers.get("Retry-After", 30))
+                print(
+                    f"[poll_decision] poll {i+1} rate limited, backing off {retry_after}s",
+                    file=sys.stderr,
+                )
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    wake_agent({
+                        "status": "ERROR",
+                        "intentId": INTENT_ID,
+                        "error": "Rate limited too many times",
+                    })
+                    return 3
+                time.sleep(retry_after)
+                continue
+
+            else:
+                consecutive_errors += 1
+                print(
+                    f"[poll_decision] poll {i+1} unexpected HTTP {r.status_code}",
+                    file=sys.stderr,
+                )
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    wake_agent({
+                        "status": "ERROR",
+                        "intentId": INTENT_ID,
+                        "error": f"Too many HTTP errors (last: {r.status_code})",
+                    })
+                    return 3
 
         except requests.RequestException as e:
             consecutive_errors += 1
