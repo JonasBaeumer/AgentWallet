@@ -29,10 +29,10 @@
 
 import { prisma } from '@/db/client';
 import { getRedisClient } from '@/config/redis';
-import { issueVirtualCard, revealCard } from '@/payments/providers/stripe/cardService';
-import { runSimulatedCheckout } from '@/payments/providers/stripe/checkoutSimulator';
-import { getStripeClient } from '@/payments/providers/stripe/stripeClient';
+import { createStripeProvider } from '@/payments/testHelpers';
 import { IntentStatus } from '@/contracts';
+
+const stripeCtx = createStripeProvider();
 
 // Don't send real Telegram messages during tests
 jest.mock('@/telegram/telegramClient', () => ({
@@ -102,13 +102,13 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
     intentId = intent.id;
 
     // Issue the virtual card via Stripe Issuing (real API call)
-    await issueVirtualCard(intentId, 100, 'eur');
+    await stripeCtx.provider.issueCard(intentId, 100, 'eur');
 
     const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
     stripeCardId = card.stripeCardId;
 
     // Reveal credentials once — stored for all tests in this suite
-    const reveal = await revealCard(intentId);
+    const reveal = await stripeCtx.provider.revealCard(intentId);
     credentials = {
       number: reveal.number,
       cvc: reveal.cvc,
@@ -151,8 +151,7 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
     });
 
     it('card appears in Stripe as a virtual card with the correct spending limit', async () => {
-      const stripe = getStripeClient();
-      const stripeCard = await stripe.issuing.cards.retrieve(stripeCardId);
+      const stripeCard = await stripeCtx.stripe.issuing.cards.retrieve(stripeCardId);
 
       expect(stripeCard.type).toBe('virtual');
       expect(stripeCard.status).toBe('active');
@@ -177,10 +176,8 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
     });
 
     it('declines a test authorization that exceeds the €1 spending limit', async () => {
-      const stripe = getStripeClient();
-
       // Attempt €50 against a €1 limit — Stripe should decline immediately
-      const auth = await stripe.testHelpers.issuing.authorizations.create({
+      const auth = await stripeCtx.stripe.testHelpers.issuing.authorizations.create({
         card: stripeCardId,
         amount: 5000, // €50 — far exceeds the €1 limit
         currency: 'eur',
@@ -192,10 +189,8 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
     });
 
     it('approves and captures a test authorization within the €1 spending limit', async () => {
-      const stripe = getStripeClient();
-
       // Attempt €0.50 against a €1 limit — should be approved
-      const auth = await stripe.testHelpers.issuing.authorizations.create({
+      const auth = await stripeCtx.stripe.testHelpers.issuing.authorizations.create({
         card: stripeCardId,
         amount: 50, // €0.50 — within the €1 per_authorization limit
         currency: 'eur',
@@ -205,7 +200,7 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
       expect(auth.status).toBe('pending');
 
       // Capture creates an issuing_transaction and settles the authorization
-      const captured = await stripe.testHelpers.issuing.authorizations.capture(auth.id);
+      const captured = await stripeCtx.stripe.testHelpers.issuing.authorizations.capture(auth.id);
       expect(captured.status).toBe('closed');
     });
 
@@ -218,7 +213,7 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
 
   describe('runSimulatedCheckout via intentId (test helpers)', () => {
     it('declines when charge amount exceeds the spending limit', async () => {
-      const result = await runSimulatedCheckout({
+      const result = await stripeCtx.runSimulatedCheckout({
         intentId,
         amount: 5000, // €50 against €1 card — should be declined
         currency: 'eur',
