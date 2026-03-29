@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { userAuthMiddleware } from '@/api/middleware/userAuth';
 import { prisma } from '@/db/client';
 import { expireIntent } from '@/orchestrator/intentService';
-import { IntentStatus, CardCancelPolicy } from '@/contracts';
+import { CardCancelPolicy } from '@/contracts';
+import { ACTIVE_STATES } from '@/orchestrator';
 
 const PreferencesSchema = z.object({
   cancelPolicy: z.nativeEnum(CardCancelPolicy).optional(),
@@ -17,16 +18,6 @@ const PreferencesSchema = z.object({
     });
   }
 });
-
-const ACTIVE_INTENT_STATUSES: IntentStatus[] = [
-  IntentStatus.RECEIVED,
-  IntentStatus.SEARCHING,
-  IntentStatus.QUOTED,
-  IntentStatus.AWAITING_APPROVAL,
-  IntentStatus.APPROVED,
-  IntentStatus.CARD_ISSUED,
-  IntentStatus.CHECKOUT_RUNNING,
-];
 
 export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/v1/users/me', {
@@ -63,7 +54,7 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Cancel all non-terminal intents for this user (best-effort — continue even on partial failure)
     const activeIntents = await prisma.purchaseIntent.findMany({
-      where: { userId, status: { in: ACTIVE_INTENT_STATUSES } },
+      where: { userId, status: { in: [...ACTIVE_STATES] } },
       select: { id: true },
     });
 

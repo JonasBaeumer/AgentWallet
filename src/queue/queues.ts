@@ -1,7 +1,8 @@
 import { Queue } from 'bullmq';
 import { getRedisConnectionConfig } from '@/config/redis';
+import { QUEUE_NAMES } from '@/contracts';
 
-export const searchQueue = new Queue('search-queue', {
+export const searchQueue = new Queue(QUEUE_NAMES.SEARCH, {
   connection: getRedisConnectionConfig(),
   defaultJobOptions: {
     attempts: 3,
@@ -11,7 +12,7 @@ export const searchQueue = new Queue('search-queue', {
   },
 });
 
-export const checkoutQueue = new Queue('checkout-queue', {
+export const checkoutQueue = new Queue(QUEUE_NAMES.CHECKOUT, {
   connection: getRedisConnectionConfig(),
   defaultJobOptions: {
     attempts: 3,
@@ -21,7 +22,7 @@ export const checkoutQueue = new Queue('checkout-queue', {
   },
 });
 
-export const cancelCardQueue = new Queue('cancel-card-queue', {
+export const cancelCardQueue = new Queue(QUEUE_NAMES.CANCEL_CARD, {
   connection: getRedisConnectionConfig(),
   defaultJobOptions: {
     attempts: 5,

@@ -17,3 +17,13 @@ export interface CheckoutIntentJob {
   stripeCardId: string;
   last4: string;
 }
+
+export interface CancelCardJob {
+  intentId: string;
+}
+
+export const QUEUE_NAMES = {
+  SEARCH: 'search-queue',
+  CHECKOUT: 'checkout-queue',
+  CANCEL_CARD: 'cancel-card-queue',
+} as const;

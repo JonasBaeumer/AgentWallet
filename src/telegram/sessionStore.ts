@@ -37,6 +37,7 @@ const PREF_TTL_SECONDS = 300; // 5 minutes to reply with a number
 
 export interface PrefSession {
   awaitingCustomTtl: true;
+  promptMessageId?: number;
 }
 
 export async function getPrefSession(chatId: number | string): Promise<PrefSession | null> {
