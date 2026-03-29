@@ -1,5 +1,5 @@
 import { prisma } from '@/db/client';
-import { IntentEvent, PurchaseIntentData, AuditEventData, IntentNotFoundError } from '@/contracts';
+import { IntentEvent, PurchaseIntentData, AuditEventData, IntentNotFoundError, CardCancelPolicy } from '@/contracts';
 import { transitionIntent, TransitionResult } from './stateMachine';
 import { getPaymentProvider } from '@/payments';
 import { returnIntent } from '@/ledger/potService';
@@ -77,7 +77,7 @@ async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
 
   const { cancelPolicy, cardTtlMinutes, telegramChatId } = intent.user;
 
-  if (cancelPolicy === 'ON_TRANSACTION') {
+  if (cancelPolicy === CardCancelPolicy.ON_TRANSACTION) {
     // Cancellation is handled by the issuing_transaction.created Stripe webhook.
     // Fallback for stub/test flows where no real Stripe transaction fires:
     if (!intent.virtualCard) {
@@ -85,13 +85,13 @@ async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
         console.error(JSON.stringify({ level: 'error', message: 'ON_TRANSACTION stub fallback cancel failed', intentId, error: String(err) }));
       });
     }
-  } else if (cancelPolicy === 'IMMEDIATE') {
+  } else if (cancelPolicy === CardCancelPolicy.IMMEDIATE) {
     await getPaymentProvider().cancelCard(intentId).catch((err) => {
       console.error(JSON.stringify({ level: 'error', message: 'IMMEDIATE card cancel failed', intentId, error: String(err) }));
     });
-  } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes) {
+  } else if (cancelPolicy === CardCancelPolicy.AFTER_TTL && cardTtlMinutes) {
     await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
-  } else if (cancelPolicy === 'MANUAL') {
+  } else if (cancelPolicy === CardCancelPolicy.MANUAL) {
     await getPaymentProvider().freezeCard(intentId).catch((err) => {
       console.error(JSON.stringify({ level: 'error', message: 'MANUAL card freeze failed', intentId, error: String(err) }));
     });

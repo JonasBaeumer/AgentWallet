@@ -4,6 +4,7 @@ import { getTelegramBot } from './telegramClient';
 import { expireIntent } from '@/orchestrator/intentService';
 import { getPaymentProvider } from '@/payments';
 import { IntentStatus, CardCancelPolicy } from '@/contracts';
+import { ACTIVE_STATES } from '@/orchestrator';
 import { setPrefSession } from './sessionStore';
 
 const POLICY_LABELS: Record<CardCancelPolicy, string> = {
@@ -12,16 +13,6 @@ const POLICY_LABELS: Record<CardCancelPolicy, string> = {
   [CardCancelPolicy.AFTER_TTL]: 'After TTL',
   [CardCancelPolicy.MANUAL]: 'Manual',
 };
-
-const ACTIVE_INTENT_STATUSES: IntentStatus[] = [
-  IntentStatus.RECEIVED,
-  IntentStatus.SEARCHING,
-  IntentStatus.QUOTED,
-  IntentStatus.AWAITING_APPROVAL,
-  IntentStatus.APPROVED,
-  IntentStatus.CARD_ISSUED,
-  IntentStatus.CHECKOUT_RUNNING,
-];
 
 function formatAmount(amountInCents: number): string {
   return `£${(amountInCents / 100).toFixed(2)}`;
@@ -117,7 +108,7 @@ async function showCancelList(
   user: { id: string },
 ): Promise<void> {
   const intents = await prisma.purchaseIntent.findMany({
-    where: { userId: user.id, status: { in: ACTIVE_INTENT_STATUSES } },
+    where: { userId: user.id, status: { in: [...ACTIVE_STATES] } },
     orderBy: { createdAt: 'desc' },
   });
 
