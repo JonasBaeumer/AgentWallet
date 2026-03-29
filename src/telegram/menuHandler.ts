@@ -143,12 +143,19 @@ async function showCancelConfirm(
   chatId: number | string,
   messageId: number,
   intentId: string,
+  userId: string,
 ): Promise<void> {
   const intent = await prisma.purchaseIntent.findUnique({ where: { id: intentId } });
 
   if (!intent) {
     const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_cancel_list:_');
     await editMenu(bot, chatId, messageId, '⚠️ Intent not found.', keyboard);
+    return;
+  }
+
+  if (intent.userId !== userId) {
+    const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_cancel_list:_');
+    await editMenu(bot, chatId, messageId, '⚠️ You do not have permission to cancel this intent.', keyboard);
     return;
   }
 
@@ -169,7 +176,19 @@ async function doCancelIntent(
   chatId: number | string,
   messageId: number,
   intentId: string,
+  userId: string,
 ): Promise<void> {
+  const intent = await prisma.purchaseIntent.findUnique({ where: { id: intentId }, select: { userId: true } });
+  if (!intent) {
+    const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_main:_');
+    await editMenu(bot, chatId, messageId, '⚠️ Intent not found.', keyboard);
+    return;
+  }
+  if (intent.userId !== userId) {
+    const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_main:_');
+    await editMenu(bot, chatId, messageId, '⚠️ You do not have permission to cancel this intent.', keyboard);
+    return;
+  }
   try {
     await expireIntent(intentId);
     const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_main:_');
@@ -295,7 +314,19 @@ async function doCancelCard(
   chatId: number | string,
   messageId: number,
   intentId: string,
+  userId: string,
 ): Promise<void> {
+  const intent = await prisma.purchaseIntent.findUnique({ where: { id: intentId }, select: { userId: true } });
+  if (!intent) {
+    const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
+    await editMenu(bot, chatId, messageId, '⚠️ Intent not found.', keyboard);
+    return;
+  }
+  if (intent.userId !== userId) {
+    const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
+    await editMenu(bot, chatId, messageId, '⚠️ You do not have permission to cancel this card.', keyboard);
+    return;
+  }
   try {
     await getPaymentProvider().cancelCard(intentId);
     const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
@@ -343,21 +374,6 @@ export async function handleMenuCallback(
     return;
   }
 
-  if (action === 'menu_cancel_confirm') {
-    await showCancelConfirm(bot, chatId, messageId, payload);
-    return;
-  }
-
-  if (action === 'menu_cancel_do') {
-    await doCancelIntent(bot, chatId, messageId, payload);
-    return;
-  }
-
-  if (action === 'menu_card_cancel') {
-    await doCancelCard(bot, chatId, messageId, payload);
-    return;
-  }
-
   if (action === 'menu_pref_ttl' && payload === 'custom') {
     await startCustomTtlInput(bot, chatId, messageId);
     return;
@@ -377,7 +393,13 @@ export async function handleMenuCallback(
   }
 
   try {
-    if (action === 'menu_balance') {
+    if (action === 'menu_cancel_confirm') {
+      await showCancelConfirm(bot, chatId, messageId, payload, user.id);
+    } else if (action === 'menu_cancel_do') {
+      await doCancelIntent(bot, chatId, messageId, payload, user.id);
+    } else if (action === 'menu_card_cancel') {
+      await doCancelCard(bot, chatId, messageId, payload, user.id);
+    } else if (action === 'menu_balance') {
       await showBalance(bot, chatId, messageId, user);
     } else if (action === 'menu_history') {
       await showHistory(bot, chatId, messageId, user);
@@ -388,6 +410,10 @@ export async function handleMenuCallback(
     } else if (action === 'menu_preferences') {
       await showPreferences(bot, chatId, messageId, user);
     } else if (action === 'menu_pref_policy') {
+      if (!Object.values(CardCancelPolicy).includes(payload as CardCancelPolicy)) {
+        await editMenu(bot, chatId, messageId, '⚠️ Invalid policy value.');
+        return;
+      }
       const policy = payload as CardCancelPolicy;
       if (policy === CardCancelPolicy.AFTER_TTL) {
         await showTtlPicker(bot, chatId, messageId);

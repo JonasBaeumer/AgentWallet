@@ -106,26 +106,37 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // PATCH /v1/users/:userId/preferences
-  // Update cancel policy and optional TTL. No auth required (internal/Telegram use).
-  fastify.patch('/v1/users/:userId/preferences', async (
+  // Update cancel policy and optional TTL. Requires authentication and ownership.
+  fastify.patch('/v1/users/:userId/preferences', {
+    preHandler: userAuthMiddleware,
+  }, async (
     request: FastifyRequest<{ Params: { userId: string } }>,
     reply: FastifyReply,
   ) => {
+    const authedUser = request.user!;
     const { userId } = request.params;
+
+    if (authedUser.id !== userId) {
+      return reply.status(403).send({ error: 'Forbidden: you may only update your own preferences' });
+    }
 
     const parsed = PreferencesSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      return reply.status(404).send({ error: 'User not found' });
-    }
-
     const updated = await prisma.user.update({
       where: { id: userId },
       data: parsed.data,
+    });
+
+    await prisma.auditEvent.create({
+      data: {
+        intentId: null,
+        actor: userId,
+        event: 'PREFERENCES_UPDATED',
+        payload: parsed.data as Record<string, unknown>,
+      },
     });
 
     return reply.send({

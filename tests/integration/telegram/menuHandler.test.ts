@@ -8,6 +8,8 @@
  * Run: npm run test:integration -- --testPathPattern=telegram/menuHandler
  */
 
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { prisma } from '@/db/client';
 import { getRedisClient } from '@/config/redis';
 
@@ -479,12 +481,34 @@ testSuite('Telegram /menu integration (real DB)', () => {
   // ── PATCH /v1/users/:userId/preferences ─────────────────────────────────────
 
   describe('PATCH /v1/users/:userId/preferences', () => {
-    it('updates cancelPolicy and returns the new values', async () => {
-      const user = await createTestUser();
+    let rawKey: string;
+    let authHeader: string;
+    let authedUserId: string;
 
+    beforeEach(async () => {
+      rawKey = crypto.randomBytes(32).toString('hex');
+      const hash = await bcrypt.hash(rawKey, 10);
+      const prefix = rawKey.slice(0, 16);
+      const user = await prisma.user.create({
+        data: {
+          email: `pref-test-${Date.now()}@example.com`,
+          telegramChatId: String(TEST_CHAT_ID + 1),
+          agentId: null,
+          mainBalance: 10000,
+          maxBudgetPerIntent: 50000,
+          apiKeyHash: hash,
+          apiKeyPrefix: prefix,
+        },
+      });
+      authedUserId = user.id;
+      authHeader = `Bearer ${rawKey}`;
+    });
+
+    it('updates cancelPolicy and returns the new values', async () => {
       const res = await app.inject({
         method: 'PATCH',
-        url: `/v1/users/${user.id}/preferences`,
+        url: `/v1/users/${authedUserId}/preferences`,
+        headers: { authorization: authHeader },
         payload: { cancelPolicy: 'MANUAL' },
       });
 
@@ -492,16 +516,27 @@ testSuite('Telegram /menu integration (real DB)', () => {
       const body = JSON.parse(res.body);
       expect(body.cancelPolicy).toBe('MANUAL');
 
-      const updated = await prisma.user.findUnique({ where: { id: user.id } });
+      const updated = await prisma.user.findUnique({ where: { id: authedUserId } });
       expect(updated!.cancelPolicy).toBe('MANUAL');
     });
 
-    it('updates AFTER_TTL policy with cardTtlMinutes', async () => {
-      const user = await createTestUser();
+    it('writes an audit event on successful update', async () => {
+      await app.inject({
+        method: 'PATCH',
+        url: `/v1/users/${authedUserId}/preferences`,
+        headers: { authorization: authHeader },
+        payload: { cancelPolicy: 'IMMEDIATE' },
+      });
 
+      const audit = await prisma.auditEvent.findFirst({ where: { actor: authedUserId, event: 'PREFERENCES_UPDATED' } });
+      expect(audit).not.toBeNull();
+    });
+
+    it('updates AFTER_TTL policy with cardTtlMinutes', async () => {
       const res = await app.inject({
         method: 'PATCH',
-        url: `/v1/users/${user.id}/preferences`,
+        url: `/v1/users/${authedUserId}/preferences`,
+        headers: { authorization: authHeader },
         payload: { cancelPolicy: 'AFTER_TTL', cardTtlMinutes: 120 },
       });
 
@@ -512,11 +547,10 @@ testSuite('Telegram /menu integration (real DB)', () => {
     });
 
     it('returns 400 when cardTtlMinutes is set without AFTER_TTL policy', async () => {
-      const user = await createTestUser();
-
       const res = await app.inject({
         method: 'PATCH',
-        url: `/v1/users/${user.id}/preferences`,
+        url: `/v1/users/${authedUserId}/preferences`,
+        headers: { authorization: authHeader },
         payload: { cancelPolicy: 'IMMEDIATE', cardTtlMinutes: 60 },
       });
 
@@ -524,25 +558,50 @@ testSuite('Telegram /menu integration (real DB)', () => {
     });
 
     it('returns 400 for unknown cancelPolicy', async () => {
-      const user = await createTestUser();
-
       const res = await app.inject({
         method: 'PATCH',
-        url: `/v1/users/${user.id}/preferences`,
+        url: `/v1/users/${authedUserId}/preferences`,
+        headers: { authorization: authHeader },
         payload: { cancelPolicy: 'INVALID_POLICY' },
       });
 
       expect(res.statusCode).toBe(400);
     });
 
-    it('returns 404 for unknown userId', async () => {
+    it('returns 401 when no auth header provided', async () => {
       const res = await app.inject({
         method: 'PATCH',
-        url: '/v1/users/nonexistent-user-id/preferences',
+        url: `/v1/users/${authedUserId}/preferences`,
         payload: { cancelPolicy: 'IMMEDIATE' },
       });
 
-      expect(res.statusCode).toBe(404);
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('returns 403 when authed as a different user', async () => {
+      const otherRawKey = crypto.randomBytes(32).toString('hex');
+      const otherHash = await bcrypt.hash(otherRawKey, 10);
+      const otherPrefix = otherRawKey.slice(0, 16);
+      await prisma.user.create({
+        data: {
+          email: `other-${Date.now()}@example.com`,
+          telegramChatId: String(TEST_CHAT_ID + 2),
+          agentId: null,
+          mainBalance: 10000,
+          maxBudgetPerIntent: 50000,
+          apiKeyHash: otherHash,
+          apiKeyPrefix: otherPrefix,
+        },
+      });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/v1/users/${authedUserId}/preferences`,
+        headers: { authorization: `Bearer ${otherRawKey}` },
+        payload: { cancelPolicy: 'IMMEDIATE' },
+      });
+
+      expect(res.statusCode).toBe(403);
     });
   });
 });

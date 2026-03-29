@@ -33,7 +33,8 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
 
   // ── Menu callbacks ────────────────────────────────────────────────────────────
   if (action.startsWith('menu_')) {
-    await handleMenuCallback(bot, chatId!, messageId!, action, payload, fromId);
+    if (chatId === undefined || messageId === undefined) return;
+    await handleMenuCallback(bot, chatId, messageId, action, payload, fromId);
     return;
   }
 

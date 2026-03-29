@@ -243,8 +243,10 @@ describe('menu_cancel_list', () => {
 
 describe('menu_cancel_confirm', () => {
   it('shows intent details with confirm and back buttons', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
     (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
       id: 'i1',
+      userId: 'user-1',
       subject: 'headphones',
       query: 'headphones',
       maxBudget: 5000,
@@ -267,11 +269,40 @@ describe('menu_cancel_confirm', () => {
     expect(confirmBtn).toBeDefined();
     expect(backBtn).toBeDefined();
   });
+
+  it('shows permission error when intent belongs to a different user', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
+      id: 'i1',
+      userId: 'other-user',
+      subject: 'headphones',
+      query: 'headphones',
+      maxBudget: 5000,
+      status: 'SEARCHING',
+    });
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId,
+      messageId,
+      'menu_cancel_confirm',
+      'i1',
+      fromId,
+    );
+
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text.toLowerCase()).toContain('permission');
+  });
 });
 
 // ── menu_cancel_do ────────────────────────────────────────────────────────────
 
 describe('menu_cancel_do', () => {
+  beforeEach(() => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ userId: 'user-1' });
+  });
+
   it('calls expireIntent with the intentId', async () => {
     mockExpireIntent.mockResolvedValue({ status: 'EXPIRED' });
 
@@ -319,6 +350,23 @@ describe('menu_cancel_do', () => {
 
     const text = mockEditMessageText.mock.calls[0][2] as string;
     expect(text.toLowerCase()).toContain('went wrong');
+  });
+
+  it('shows permission error when intent belongs to a different user', async () => {
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ userId: 'other-user' });
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId,
+      messageId,
+      'menu_cancel_do',
+      'intent-abc',
+      fromId,
+    );
+
+    expect(mockExpireIntent).not.toHaveBeenCalled();
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text.toLowerCase()).toContain('permission');
   });
 });
 
@@ -416,6 +464,19 @@ describe('menu_pref_policy', () => {
     expect(actions).toContain('menu_pref_ttl:30');
     expect(actions).toContain('menu_pref_ttl:custom');
   });
+
+  it('shows error when payload is not a valid CardCancelPolicy', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId, messageId, 'menu_pref_policy', 'INVALID_POLICY', fromId,
+    );
+
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text.toLowerCase()).toContain('invalid');
+  });
 });
 
 // ── menu_pref_ttl ─────────────────────────────────────────────────────────────
@@ -457,6 +518,11 @@ describe('menu_pref_ttl', () => {
 // ── menu_card_cancel ──────────────────────────────────────────────────────────
 
 describe('menu_card_cancel', () => {
+  beforeEach(() => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ userId: 'user-1' });
+  });
+
   it('calls cancelCard and confirms', async () => {
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
@@ -478,6 +544,19 @@ describe('menu_card_cancel', () => {
 
     const text = mockEditMessageText.mock.calls[0][2] as string;
     expect(text.toLowerCase()).toContain('went wrong');
+  });
+
+  it('shows permission error when intent belongs to a different user', async () => {
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ userId: 'other-user' });
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId, messageId, 'menu_card_cancel', 'intent-abc', fromId,
+    );
+
+    expect(mockCancelCard).not.toHaveBeenCalled();
+    const text = mockEditMessageText.mock.calls[0][2] as string;
+    expect(text.toLowerCase()).toContain('permission');
   });
 });
 
