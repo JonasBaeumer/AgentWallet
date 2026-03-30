@@ -1,7 +1,11 @@
 import { prisma } from '@/db/client';
 import { PotStatus, LedgerEntryType, PotData, InsufficientFundsError, IntentNotFoundError } from '@/contracts';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'ledger/potService' });
 
 export async function reserveForIntent(userId: string, intentId: string, amount: number): Promise<PotData> {
+  log.info({ intentId, userId, amount }, 'Reserving funds');
   return await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: userId } });
     if (!user) throw new Error(`User not found: ${userId}`);
@@ -25,6 +29,7 @@ export async function reserveForIntent(userId: string, intentId: string, amount:
 }
 
 export async function settleIntent(intentId: string, actualAmount: number): Promise<void> {
+  log.info({ intentId, actualAmount }, 'Settling intent');
   await prisma.$transaction(async (tx) => {
     const pot = await tx.pot.findUnique({ where: { intentId } });
     if (!pot) throw new IntentNotFoundError(intentId);
@@ -50,6 +55,7 @@ export async function settleIntent(intentId: string, actualAmount: number): Prom
 }
 
 export async function returnIntent(intentId: string): Promise<void> {
+  log.info({ intentId }, 'Returning funds');
   await prisma.$transaction(async (tx) => {
     const pot = await tx.pot.findUnique({ where: { intentId } });
     if (!pot) return; // Nothing to return if pot doesn't exist

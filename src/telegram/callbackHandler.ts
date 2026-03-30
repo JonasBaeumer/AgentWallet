@@ -9,6 +9,9 @@ import { enqueueCheckout } from '@/queue/producers';
 import { getTelegramBot } from './telegramClient';
 import { getSignupSession, setSignupSession, clearSignupSession } from './sessionStore';
 import { handleMenuCallback } from './menuHandler';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'telegram/callbackHandler' });
 
 export async function handleTelegramCallback(update: Update): Promise<void> {
   const cb = update.callback_query;
@@ -92,6 +95,8 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
   const actorId = `telegram:${fromId}`;
   let resultText: string;
 
+  log.info({ intentId, action, actorId }, 'Processing Telegram approval callback');
+
   // Save idempotency record before doing any work so retries are blocked
   await prisma.idempotencyRecord.upsert({
     where: { key: idempotencyKey },
@@ -146,6 +151,7 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
         `⚠️ Insufficient Stripe Issuing balance (${err.currency}): available ${err.available}, required ${err.required}.`);
       return;
     }
+    log.error({ intentId, action, actorId, err }, 'Telegram approval callback failed');
     await editMessage(bot, chatId, messageId, '⚠️ Something went wrong processing your decision. Please try via the app.');
     throw err;
   }
