@@ -3,6 +3,9 @@ import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
 import { reconcileIntent } from './reconciliationService';
 import { getPaymentProvider } from '@/payments';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'payments/stripe/webhookHandler' });
 
 export async function handleStripeEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>> {
   const stripe = getStripeClient();
@@ -13,7 +16,7 @@ export async function handleStripeEvent(rawBody: Buffer | string, signature: str
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
   } catch (err) {
-    console.error(JSON.stringify({ level: 'error', message: 'Invalid Stripe webhook signature', error: String(err) }));
+    log.error({ err }, 'Invalid Stripe webhook signature');
     throw new Error(`Webhook signature verification failed: ${String(err)}`);
   }
 
@@ -46,7 +49,7 @@ export async function handleStripeEvent(rawBody: Buffer | string, signature: str
       });
       if (intentForPolicy?.user?.cancelPolicy === 'ON_TRANSACTION') {
         getPaymentProvider().cancelCard(intentId).catch((err) => {
-          console.error(JSON.stringify({ level: 'error', message: 'ON_TRANSACTION card cancel failed', intentId, error: String(err) }));
+          log.error({ intentId, err }, 'ON_TRANSACTION card cancel failed');
         });
       }
 
@@ -56,13 +59,13 @@ export async function handleStripeEvent(rawBody: Buffer | string, signature: str
           await logAuditEvent(intentId, 'RECONCILIATION_DISCREPANCY', { discrepancies: report.discrepancies, report });
         }
       }).catch((err) => {
-        console.error(JSON.stringify({ level: 'error', message: 'Reconciliation failed', intentId, error: String(err) }));
+        log.error({ intentId, err }, 'Reconciliation failed');
       });
       break;
     }
 
     default:
-      console.log(JSON.stringify({ level: 'info', message: 'Unhandled Stripe event', type: event.type }));
+      log.info({ type: event.type }, 'Unhandled Stripe event');
   }
 
   return { received: true };

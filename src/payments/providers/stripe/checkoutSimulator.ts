@@ -2,6 +2,9 @@ import Stripe from 'stripe';
 import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
 import { IntentNotFoundError } from '@/contracts';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'payments/stripe/checkoutSimulator' });
 
 export interface SimulatedCheckoutResult {
   success: boolean;
@@ -35,14 +38,7 @@ export async function runSimulatedCheckout(params: {
     });
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      console.error(JSON.stringify({
-        level: 'error',
-        message: 'checkoutSimulator: authorization create failed',
-        type: err.type,
-        code: err.code,
-        errMessage: err.message,
-        intentId,
-      }));
+      log.error({ intentId, type: err.type, code: err.code, err }, 'checkoutSimulator: authorization create failed');
     }
     throw err;
   }
@@ -62,14 +58,7 @@ export async function runSimulatedCheckout(params: {
     await stripe.testHelpers.issuing.authorizations.capture(auth.id);
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      console.error(JSON.stringify({
-        level: 'error',
-        message: 'checkoutSimulator: authorization capture failed',
-        type: err.type,
-        code: err.code,
-        errMessage: err.message,
-        intentId,
-      }));
+      log.error({ intentId, type: err.type, code: err.code, err }, 'checkoutSimulator: authorization capture failed');
     }
     throw err;
   }
