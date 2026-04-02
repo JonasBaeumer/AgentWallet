@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { userAuthMiddleware } from '@/api/middleware/userAuth';
 import { prisma } from '@/db/client';
 import { expireIntent } from '@/orchestrator/intentService';
-import { IntentStatus, CardCancelPolicy } from '@/contracts';
+import { CardCancelPolicy } from '@/contracts';
+import { ACTIVE_STATES } from '@/orchestrator';
 
 const PreferencesSchema = z.object({
   cancelPolicy: z.nativeEnum(CardCancelPolicy).optional(),
@@ -17,16 +18,6 @@ const PreferencesSchema = z.object({
     });
   }
 });
-
-const ACTIVE_INTENT_STATUSES: IntentStatus[] = [
-  IntentStatus.RECEIVED,
-  IntentStatus.SEARCHING,
-  IntentStatus.QUOTED,
-  IntentStatus.AWAITING_APPROVAL,
-  IntentStatus.APPROVED,
-  IntentStatus.CARD_ISSUED,
-  IntentStatus.CHECKOUT_RUNNING,
-];
 
 export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/v1/users/me', {
@@ -63,7 +54,7 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Cancel all non-terminal intents for this user (best-effort — continue even on partial failure)
     const activeIntents = await prisma.purchaseIntent.findMany({
-      where: { userId, status: { in: ACTIVE_INTENT_STATUSES } },
+      where: { userId, status: { in: [...ACTIVE_STATES] } },
       select: { id: true },
     });
 
@@ -106,26 +97,37 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // PATCH /v1/users/:userId/preferences
-  // Update cancel policy and optional TTL. No auth required (internal/Telegram use).
-  fastify.patch('/v1/users/:userId/preferences', async (
+  // Update cancel policy and optional TTL. Requires authentication and ownership.
+  fastify.patch('/v1/users/:userId/preferences', {
+    preHandler: userAuthMiddleware,
+  }, async (
     request: FastifyRequest<{ Params: { userId: string } }>,
     reply: FastifyReply,
   ) => {
+    const authedUser = request.user!;
     const { userId } = request.params;
+
+    if (authedUser.id !== userId) {
+      return reply.status(403).send({ error: 'Forbidden: you may only update your own preferences' });
+    }
 
     const parsed = PreferencesSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      return reply.status(404).send({ error: 'User not found' });
-    }
-
     const updated = await prisma.user.update({
       where: { id: userId },
       data: parsed.data,
+    });
+
+    await prisma.auditEvent.create({
+      data: {
+        intentId: null,
+        actor: userId,
+        event: 'PREFERENCES_UPDATED',
+        payload: parsed.data as Record<string, unknown>,
+      },
     });
 
     return reply.send({

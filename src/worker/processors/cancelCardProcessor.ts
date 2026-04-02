@@ -1,14 +1,11 @@
 import { Worker, Job } from 'bullmq';
 import { getRedisConnectionConfig } from '@/config/redis';
 import { getPaymentProvider } from '@/payments';
-
-interface CancelCardJob {
-  intentId: string;
-}
+import { CancelCardJob, QUEUE_NAMES } from '@/contracts';
 
 export function createCancelCardWorker(): Worker {
   return new Worker(
-    'cancel-card-queue',
+    QUEUE_NAMES.CANCEL_CARD,
     async (job: Job<CancelCardJob>) => {
       const { intentId } = job.data;
       console.log(JSON.stringify({ level: 'info', message: 'Processing cancel card job', intentId }));
