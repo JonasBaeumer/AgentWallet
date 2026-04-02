@@ -35,7 +35,11 @@ jest.mock('@/queue/producers', () => ({
   enqueueCancelCard: jest.fn().mockResolvedValue(undefined),
 }));
 
-const hasStripeKey = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_');
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
+const hasStripeKey =
+  !!STRIPE_KEY &&
+  STRIPE_KEY.startsWith('sk_test_') &&
+  !STRIPE_KEY.includes('placeholder');
 const testSuite = hasStripeKey ? describe : describe.skip;
 
 const RUN_ID = Date.now();
@@ -44,19 +48,21 @@ const createdIntentIds: string[] = [];
 const createdUserIds: string[] = [];
 
 afterAll(async () => {
+  const errors: unknown[] = [];
   for (const intentId of createdIntentIds) {
-    await prisma.ledgerEntry.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.pot.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.virtualCard.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.auditEvent.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.approvalDecision.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.purchaseIntent.deleteMany({ where: { id: intentId } }).catch(() => {});
+    for (const model of ['ledgerEntry', 'pot', 'virtualCard', 'auditEvent', 'approvalDecision'] as const) {
+      await (prisma[model] as any).deleteMany({ where: { intentId } }).catch((e: unknown) => errors.push(e));
+    }
+    await prisma.purchaseIntent.deleteMany({ where: { id: intentId } }).catch((e: unknown) => errors.push(e));
   }
   for (const userId of createdUserIds) {
-    await prisma.user.deleteMany({ where: { id: userId } }).catch(() => {});
+    await prisma.user.deleteMany({ where: { id: userId } }).catch((e: unknown) => errors.push(e));
   }
   await prisma.$disconnect();
-  disconnectRedis();
+  await disconnectRedis();
+  if (errors.length) {
+    console.error(`afterAll cleanup encountered ${errors.length} error(s):`, errors);
+  }
 });
 
 testSuite('Card lifecycle integration', () => {
@@ -69,37 +75,43 @@ testSuite('Card lifecycle integration', () => {
     let stripeCardId: string;
 
     beforeAll(async () => {
-      const user = await prisma.user.create({
-        data: {
-          email: `lifecycle-success-${RUN_ID}@example.com`,
-          mainBalance: 10_000,
-          maxBudgetPerIntent: 50_000,
-        },
-      });
-      userId = user.id;
-      createdUserIds.push(userId);
+      try {
+        const user = await prisma.user.create({
+          data: {
+            email: `lifecycle-success-${RUN_ID}@example.com`,
+            mainBalance: 10_000,
+            maxBudgetPerIntent: 50_000,
+          },
+        });
+        userId = user.id;
+        createdUserIds.push(userId);
 
-      const intent = await prisma.purchaseIntent.create({
-        data: {
-          userId,
-          query: 'Lifecycle test — successful purchase',
-          maxBudget: 1_000,
-          currency: 'eur',
-          status: IntentStatus.CARD_ISSUED,
-          metadata: {},
-          idempotencyKey: `lifecycle-success-${RUN_ID}`,
-        },
-      });
-      intentId = intent.id;
-      createdIntentIds.push(intentId);
+        // Intent uses 'eur' for Stripe Issuing; note that potService currently
+        // hardcodes 'gbp' on ledger entries — a known mismatch tracked separately.
+        const intent = await prisma.purchaseIntent.create({
+          data: {
+            userId,
+            query: 'Lifecycle test — successful purchase',
+            maxBudget: 1_000,
+            currency: 'eur',
+            status: IntentStatus.CARD_ISSUED,
+            metadata: {},
+            idempotencyKey: `lifecycle-success-${RUN_ID}`,
+          },
+        });
+        intentId = intent.id;
+        createdIntentIds.push(intentId);
 
-      await issueVirtualCard(intentId, 1_000, 'eur');
-      const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
-      stripeCardId = card.stripeCardId;
+        await issueVirtualCard(intentId, 1_000, 'eur');
+        const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
+        stripeCardId = card.stripeCardId;
 
-      // Stripe test mode needs ~3-5s for cardholder verification to settle;
-      // without this wait, authorizations are declined with cardholder_verification_required
-      await new Promise((r) => setTimeout(r, 5_000));
+        // Stripe test mode needs ~3-5s for cardholder verification to settle;
+        // without this wait, authorizations are declined with cardholder_verification_required
+        await new Promise((r) => setTimeout(r, 5_000));
+      } catch (err) {
+        throw new Error(`Group 1 setup failed: ${err}`);
+      }
     }, 30_000);
 
     it('reserves funds and reduces user balance to €90', async () => {
@@ -127,17 +139,15 @@ testSuite('Card lifecycle integration', () => {
       expect(tx.currency).toBe('eur');
     });
 
-    it('settles the intent — pot is SETTLED with settledAmount 700', async () => {
+    it('settles the intent and returns €3 surplus to user', async () => {
       await settleIntent(intentId, 700);
 
       const pot = await prisma.pot.findUniqueOrThrow({ where: { intentId } });
       expect(pot.status).toBe(PotStatus.SETTLED);
       expect(pot.settledAmount).toBe(700);
-    });
 
-    it('returns €3 surplus — user balance is now €93', async () => {
       const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
-      expect(user.mainBalance).toBe(9_300);
+      expect(user.mainBalance).toBe(9_300); // €90 + €3 surplus
     });
 
     it('cancels the card on Stripe and records cancelledAt in DB', async () => {
@@ -170,35 +180,39 @@ testSuite('Card lifecycle integration', () => {
     let stripeCardId: string;
 
     beforeAll(async () => {
-      const user = await prisma.user.create({
-        data: {
-          email: `lifecycle-fail-${RUN_ID}@example.com`,
-          mainBalance: 10_000,
-          maxBudgetPerIntent: 50_000,
-        },
-      });
-      userId = user.id;
-      createdUserIds.push(userId);
+      try {
+        const user = await prisma.user.create({
+          data: {
+            email: `lifecycle-fail-${RUN_ID}@example.com`,
+            mainBalance: 10_000,
+            maxBudgetPerIntent: 50_000,
+          },
+        });
+        userId = user.id;
+        createdUserIds.push(userId);
 
-      const intent = await prisma.purchaseIntent.create({
-        data: {
-          userId,
-          query: 'Lifecycle test — failed purchase',
-          maxBudget: 1_000,
-          currency: 'eur',
-          status: IntentStatus.CARD_ISSUED,
-          metadata: {},
-          idempotencyKey: `lifecycle-fail-${RUN_ID}`,
-        },
-      });
-      intentId = intent.id;
-      createdIntentIds.push(intentId);
+        const intent = await prisma.purchaseIntent.create({
+          data: {
+            userId,
+            query: 'Lifecycle test — failed purchase',
+            maxBudget: 1_000,
+            currency: 'eur',
+            status: IntentStatus.CARD_ISSUED,
+            metadata: {},
+            idempotencyKey: `lifecycle-fail-${RUN_ID}`,
+          },
+        });
+        intentId = intent.id;
+        createdIntentIds.push(intentId);
 
-      await issueVirtualCard(intentId, 1_000, 'eur');
-      const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
-      stripeCardId = card.stripeCardId;
+        await issueVirtualCard(intentId, 1_000, 'eur');
+        const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
+        stripeCardId = card.stripeCardId;
 
-      await new Promise((r) => setTimeout(r, 5_000));
+        await new Promise((r) => setTimeout(r, 5_000));
+      } catch (err) {
+        throw new Error(`Group 2 setup failed: ${err}`);
+      }
     }, 30_000);
 
     it('reserves funds and reduces user balance to €90', async () => {
@@ -228,12 +242,15 @@ testSuite('Card lifecycle integration', () => {
       expect(user.mainBalance).toBe(10_000);
     });
 
-    it('cancels the card on Stripe', async () => {
+    it('cancels the card on Stripe and records cancelledAt in DB', async () => {
       await cancelCard(intentId);
 
       const stripe = getStripeClient();
       const stripeCard = await stripe.issuing.cards.retrieve(stripeCardId);
       expect(stripeCard.status).toBe('canceled');
+
+      const dbCard = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
+      expect(dbCard.cancelledAt).not.toBeNull();
     });
   });
 
@@ -245,47 +262,51 @@ testSuite('Card lifecycle integration', () => {
     let returnIntentId: string;
 
     beforeAll(async () => {
-      const user = await prisma.user.create({
-        data: {
-          email: `lifecycle-idempotent-${RUN_ID}@example.com`,
-          mainBalance: 10_000,
-          maxBudgetPerIntent: 50_000,
-        },
-      });
-      userId = user.id;
-      createdUserIds.push(userId);
+      try {
+        const user = await prisma.user.create({
+          data: {
+            email: `lifecycle-idempotent-${RUN_ID}@example.com`,
+            mainBalance: 10_000,
+            maxBudgetPerIntent: 50_000,
+          },
+        });
+        userId = user.id;
+        createdUserIds.push(userId);
 
-      // Intent with card for double-cancel test
-      const cancelIntent = await prisma.purchaseIntent.create({
-        data: {
-          userId,
-          query: 'Idempotency test — cancel',
-          maxBudget: 1_000,
-          currency: 'eur',
-          status: IntentStatus.CARD_ISSUED,
-          metadata: {},
-          idempotencyKey: `lifecycle-idem-cancel-${RUN_ID}`,
-        },
-      });
-      cancelIntentId = cancelIntent.id;
-      createdIntentIds.push(cancelIntentId);
-      await issueVirtualCard(cancelIntentId, 1_000, 'eur');
+        // Intent with card for double-cancel test
+        const cancelIntent = await prisma.purchaseIntent.create({
+          data: {
+            userId,
+            query: 'Idempotency test — cancel',
+            maxBudget: 1_000,
+            currency: 'eur',
+            status: IntentStatus.CARD_ISSUED,
+            metadata: {},
+            idempotencyKey: `lifecycle-idem-cancel-${RUN_ID}`,
+          },
+        });
+        cancelIntentId = cancelIntent.id;
+        createdIntentIds.push(cancelIntentId);
+        await issueVirtualCard(cancelIntentId, 1_000, 'eur');
 
-      // Intent with pot for double-return test (no card needed)
-      const returnIntent_ = await prisma.purchaseIntent.create({
-        data: {
-          userId,
-          query: 'Idempotency test — return',
-          maxBudget: 1_000,
-          currency: 'eur',
-          status: IntentStatus.CARD_ISSUED,
-          metadata: {},
-          idempotencyKey: `lifecycle-idem-return-${RUN_ID}`,
-        },
-      });
-      returnIntentId = returnIntent_.id;
-      createdIntentIds.push(returnIntentId);
-      await reserveForIntent(userId, returnIntentId, 1_000);
+        // Intent with pot for double-return test (no card needed)
+        const returnIntent_ = await prisma.purchaseIntent.create({
+          data: {
+            userId,
+            query: 'Idempotency test — return',
+            maxBudget: 1_000,
+            currency: 'eur',
+            status: IntentStatus.CARD_ISSUED,
+            metadata: {},
+            idempotencyKey: `lifecycle-idem-return-${RUN_ID}`,
+          },
+        });
+        returnIntentId = returnIntent_.id;
+        createdIntentIds.push(returnIntentId);
+        await reserveForIntent(userId, returnIntentId, 1_000);
+      } catch (err) {
+        throw new Error(`Group 3 setup failed: ${err}`);
+      }
     }, 30_000);
 
     it('double cancelCard does not throw', async () => {
@@ -296,14 +317,19 @@ testSuite('Card lifecycle integration', () => {
       expect(card.cancelledAt).not.toBeNull();
     });
 
-    it('double returnIntent is a no-op', async () => {
+    it('double returnIntent is a no-op — balance unchanged', async () => {
       await returnIntent(returnIntentId);
       const potAfterFirst = await prisma.pot.findUniqueOrThrow({ where: { intentId: returnIntentId } });
       expect(potAfterFirst.status).toBe(PotStatus.RETURNED);
 
+      const balanceAfterFirst = (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).mainBalance;
+
       await expect(returnIntent(returnIntentId)).resolves.toBeUndefined();
       const potAfterSecond = await prisma.pot.findUniqueOrThrow({ where: { intentId: returnIntentId } });
       expect(potAfterSecond.status).toBe(PotStatus.RETURNED);
+
+      const balanceAfterSecond = (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).mainBalance;
+      expect(balanceAfterSecond).toBe(balanceAfterFirst);
     });
   });
 });
