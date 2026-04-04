@@ -42,28 +42,9 @@ All four checks must pass before a PR can be merged.
 
 ## Branch protection (main)
 
-These rules must be configured in **Settings → Branches → Add rule** for the `main` branch:
-
-- Direct pushes disabled (require a pull request)
-- **Require at least 1 approving review** before merge
-- **Require review from Code Owners** (enforces `.github/CODEOWNERS`)
-- **Require signed commits** — all commits on the branch must be GPG- or SSH-signed
-- All CI status checks must pass (lint, type-check, unit-test, integration-test)
-
-The `.github/CODEOWNERS` file lists all four core contributors (`@JonasBaeumer`, `@georgyia`, `@aleksandr-gorbunov`, `@Hajuj`) as required reviewers for all files. GitHub will automatically request a review from the team on every PR and block merge until at least one approves.
-
-### Setting up commit signing
-
-If you haven't set up commit signing yet, the quickest path is SSH signing (Git ≥ 2.34):
-
-```bash
-# Tell Git to sign commits with your SSH key
-git config --global gpg.format ssh
-git config --global user.signingkey ~/.ssh/id_ed25519.pub
-git config --global commit.gpgsign true
-```
-
-Or with a GPG key — see [GitHub's guide](https://docs.github.com/en/authentication/managing-commit-signature-verification).
+- Direct pushes to `main` are disabled
+- At least 1 approving review required
+- All CI status checks must pass
 
 ## Required repository secrets
 
