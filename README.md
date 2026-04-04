@@ -636,3 +636,4 @@ Integration tests are skipped automatically when `STRIPE_SECRET_KEY` is not a `s
 ## License
 
 MIT
+
