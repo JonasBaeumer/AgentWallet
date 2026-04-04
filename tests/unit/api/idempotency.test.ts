@@ -8,7 +8,7 @@ jest.mock('@/db/client', () => ({
   },
 }));
 
-import { idempotencyMiddleware, saveIdempotencyResponse } from '@/api/middleware/idempotency';
+import { idempotencyMiddleware } from '@/api/middleware/idempotency';
 import { prisma } from '@/db/client';
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
@@ -20,7 +20,10 @@ describe('idempotencyMiddleware', () => {
 
   it('replays stored response when key exists', async () => {
     const storedResponse = { intentId: 'i-1', status: 'RECEIVED' };
-    (mockPrisma.idempotencyRecord.findUnique as jest.Mock).mockResolvedValueOnce({ key: 'key-1', responseBody: storedResponse });
+    (mockPrisma.idempotencyRecord.findUnique as jest.Mock).mockResolvedValueOnce({
+      key: 'key-1',
+      responseBody: storedResponse,
+    });
 
     const mockRequest = { headers: { 'x-idempotency-key': 'key-1' } } as any;
     await idempotencyMiddleware(mockRequest, mockReply as any);

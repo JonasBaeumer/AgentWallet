@@ -21,25 +21,22 @@ export function buildApp() {
 
   // Register content-type parser: for Stripe webhook path pass raw buffer (required for
   // signature verification); for all other application/json parse as JSON.
-  fastify.addContentTypeParser(
-    'application/json',
-    { parseAs: 'buffer' },
-    (req, body, done) => {
-      const path = req.url?.split('?')[0];
-      if (path === '/v1/webhooks/stripe') {
-        done(null, body);
-        return;
-      }
-      try {
-        done(null, JSON.parse(body.toString()));
-      } catch (err) {
-        done(err as Error, undefined);
-      }
+  fastify.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
+    const path = req.url?.split('?')[0];
+    if (path === '/v1/webhooks/stripe') {
+      done(null, body);
+      return;
     }
-  );
+    try {
+      done(null, JSON.parse(body.toString()));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
 
   // Global rate limit — 60 req/min per IP, Redis-backed in production
   if (process.env.NODE_ENV !== 'test') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getRedisClient } = require('@/config/redis');
     fastify.register(rateLimit, {
       global: true,

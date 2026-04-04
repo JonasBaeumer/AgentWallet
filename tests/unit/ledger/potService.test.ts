@@ -27,7 +27,9 @@ describe('reserveForIntent', () => {
     tx.user.findUnique.mockResolvedValue({ id: 'user-1', mainBalance: 500 });
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => fn(tx));
 
-    await expect(reserveForIntent('user-1', 'intent-1', 1000)).rejects.toThrow(InsufficientFundsError);
+    await expect(reserveForIntent('user-1', 'intent-1', 1000)).rejects.toThrow(
+      InsufficientFundsError,
+    );
   });
 
   it('creates pot and ledger entry when balance sufficient', async () => {
@@ -38,22 +40,29 @@ describe('reserveForIntent', () => {
     tx.user.update.mockResolvedValue({});
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => fn(tx));
 
-    const result = await reserveForIntent('user-1', 'intent-1', 5000);
+    await reserveForIntent('user-1', 'intent-1', 5000);
 
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
       data: { mainBalance: { decrement: 5000 } },
     });
-    expect(tx.pot.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ reservedAmount: 5000, status: 'ACTIVE' }),
-    }));
+    expect(tx.pot.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ reservedAmount: 5000, status: 'ACTIVE' }),
+      }),
+    );
   });
 });
 
 describe('settleIntent', () => {
   it('returns surplus to mainBalance', async () => {
     const tx = makeTxMock();
-    tx.pot.findUnique.mockResolvedValue({ id: 'pot-1', userId: 'user-1', reservedAmount: 10000, status: 'ACTIVE' });
+    tx.pot.findUnique.mockResolvedValue({
+      id: 'pot-1',
+      userId: 'user-1',
+      reservedAmount: 10000,
+      status: 'ACTIVE',
+    });
     tx.pot.update.mockResolvedValue({});
     tx.user.update.mockResolvedValue({});
     tx.ledgerEntry.create.mockResolvedValue({});
@@ -69,7 +78,12 @@ describe('settleIntent', () => {
 
   it('does not update balance when no surplus', async () => {
     const tx = makeTxMock();
-    tx.pot.findUnique.mockResolvedValue({ id: 'pot-1', userId: 'user-1', reservedAmount: 5000, status: 'ACTIVE' });
+    tx.pot.findUnique.mockResolvedValue({
+      id: 'pot-1',
+      userId: 'user-1',
+      reservedAmount: 5000,
+      status: 'ACTIVE',
+    });
     tx.pot.update.mockResolvedValue({});
     tx.ledgerEntry.create.mockResolvedValue({});
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => fn(tx));
@@ -83,7 +97,12 @@ describe('settleIntent', () => {
 describe('returnIntent', () => {
   it('returns full reserved amount to mainBalance', async () => {
     const tx = makeTxMock();
-    tx.pot.findUnique.mockResolvedValue({ id: 'pot-1', userId: 'user-1', reservedAmount: 8000, status: 'ACTIVE' });
+    tx.pot.findUnique.mockResolvedValue({
+      id: 'pot-1',
+      userId: 'user-1',
+      reservedAmount: 8000,
+      status: 'ACTIVE',
+    });
     tx.user.update.mockResolvedValue({});
     tx.pot.update.mockResolvedValue({});
     tx.ledgerEntry.create.mockResolvedValue({});

@@ -10,9 +10,11 @@ export function getPaymentProvider(): IPaymentProvider {
 
   // NODE_ENV=test always uses mock regardless of PAYMENT_PROVIDER setting
   if (name === 'mock' || env.NODE_ENV === 'test') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { MockPaymentProvider } = require('./providers/mock/mockProvider');
     _provider = new MockPaymentProvider();
   } else if (name === 'stripe') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { StripePaymentProvider } = require('./providers/stripe');
     _provider = new StripePaymentProvider();
   } else {
