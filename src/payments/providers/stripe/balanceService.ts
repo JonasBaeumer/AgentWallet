@@ -1,6 +1,9 @@
 import Stripe from 'stripe';
 import { IssuingBalance } from '@/contracts';
 import { getStripeClient } from './stripeClient';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'payments/stripe/balanceService' });
 
 export async function getIssuingBalance(currency: string): Promise<IssuingBalance> {
   const stripe = getStripeClient();
@@ -11,13 +14,7 @@ export async function getIssuingBalance(currency: string): Promise<IssuingBalanc
     balance = await stripe.balance.retrieve();
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      console.error(JSON.stringify({
-        level: 'error',
-        message: 'Failed to retrieve Stripe Issuing balance',
-        type: err.type,
-        code: err.code,
-        stripeMessage: err.message,
-      }));
+      log.error({ type: err.type, code: err.code, err }, 'Failed to retrieve Stripe Issuing balance');
     }
     throw err;
   }

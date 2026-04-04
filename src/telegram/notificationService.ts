@@ -1,6 +1,9 @@
 import { InlineKeyboard } from 'grammy';
 import { prisma } from '@/db/client';
 import { getTelegramBot } from './telegramClient';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'telegram/notificationService' });
 
 export async function sendApprovalRequest(intentId: string): Promise<void> {
   const intent = await prisma.purchaseIntent.findUnique({
@@ -10,7 +13,7 @@ export async function sendApprovalRequest(intentId: string): Promise<void> {
 
   if (!intent) return;
   if (!intent.user.telegramChatId) {
-    console.log(JSON.stringify({ level: 'info', message: 'No telegramChatId for user, skipping notification', intentId }));
+    log.info({ intentId }, 'No telegramChatId for user, skipping notification');
     return;
   }
 
@@ -45,7 +48,7 @@ export async function sendApprovalRequest(intentId: string): Promise<void> {
       data: { metadata: updatedMetadata as any },
     });
   } catch (err) {
-    console.error(JSON.stringify({ level: 'error', message: 'Failed to send Telegram notification', intentId, error: String(err) }));
+    log.error({ intentId, err }, 'Failed to send Telegram notification');
   }
 }
 

@@ -1,19 +1,22 @@
 import { searchQueue, checkoutQueue, cancelCardQueue } from './queues';
 import { JOB_NAMES } from './jobTypes';
 import { SearchIntentJob, CheckoutIntentJob } from '@/contracts';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'queue/producers' });
 
 export async function enqueueSearch(intentId: string, payload: SearchIntentJob): Promise<void> {
   await searchQueue.add(JOB_NAMES.SEARCH_INTENT, payload, {
     jobId: intentId, // deduplication by intentId
   });
-  console.log(JSON.stringify({ level: 'info', message: 'Enqueued search job', intentId }));
+  log.info({ intentId }, 'Enqueued search job');
 }
 
 export async function enqueueCheckout(intentId: string, payload: CheckoutIntentJob): Promise<void> {
   await checkoutQueue.add(JOB_NAMES.CHECKOUT_INTENT, payload, {
     jobId: intentId, // deduplication by intentId
   });
-  console.log(JSON.stringify({ level: 'info', message: 'Enqueued checkout job', intentId }));
+  log.info({ intentId }, 'Enqueued checkout job');
 }
 
 export async function enqueueCancelCard(intentId: string, delayMs: number): Promise<void> {
@@ -22,5 +25,5 @@ export async function enqueueCancelCard(intentId: string, delayMs: number): Prom
     { intentId },
     { jobId: `cancel-${intentId}`, delay: delayMs },
   );
-  console.log(JSON.stringify({ level: 'info', message: 'Enqueued cancel card job', intentId, delayMs }));
+  log.info({ intentId, delayMs }, 'Enqueued cancel card job');
 }
