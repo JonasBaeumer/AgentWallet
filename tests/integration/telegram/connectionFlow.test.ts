@@ -21,7 +21,9 @@
  */
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_TEST_CHAT_ID = process.env.TELEGRAM_TEST_CHAT_ID;
+// Prefer the dedicated test channel to keep the main bot chat uncluttered
+const TELEGRAM_TEST_CHAT_ID =
+  process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID;
 const isMockEnv = process.env.TELEGRAM_MOCK === 'true';
 
 const describeIfTelegram =
@@ -145,7 +147,7 @@ describeIfTelegram('Telegram Bot API infrastructure', () => {
           }
         : () => {
             console.log(
-              'Step 3.1 skipped — set TELEGRAM_TEST_CHAT_ID in .env to enable',
+              'Step 3.1 skipped — set TELEGRAM_TEST_CHANNEL_ID or TELEGRAM_TEST_CHAT_ID in .env to enable',
             );
           },
     );
