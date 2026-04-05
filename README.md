@@ -540,7 +540,8 @@ Copy `.env.example` to `.env` and fill in:
 | `WORKER_API_KEY` | Yes | `local-dev-worker-key` | Shared secret for agent endpoints |
 | `TELEGRAM_BOT_TOKEN` | No | — | Telegram bot token from @BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | No | — | Secret token for Telegram webhook verification |
-| `TELEGRAM_TEST_CHAT_ID` | No | — | Chat ID for local integration smoke tests |
+| `TELEGRAM_TEST_CHAT_ID` | No | — | Chat ID for local integration smoke tests (main bot DM) |
+| `TELEGRAM_TEST_CHANNEL_ID` | No | — | Chat ID of a separate Telegram group for integration test messages; routes live test traffic away from the main bot DM |
 | `PORT` | No | `3000` | HTTP listen port |
 | `NODE_ENV` | No | `development` | `development` / `test` / `production` |
 
