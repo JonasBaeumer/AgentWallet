@@ -1,15 +1,6 @@
 import { log, confirm, select, isCancel } from '@clack/prompts';
 import { SetupContext } from './types';
 import { exec, pollUntil } from './utils';
-import net from 'net';
-
-interface PortConflict {
-  port: number;
-  service: string;
-  pid: string | null;
-  process: string | null;
-}
-
 function isContainerRunning(serviceName: string): boolean {
   const result = exec(`docker compose ps --format json ${serviceName}`);
   if (result.code !== 0) return false;
@@ -25,29 +16,59 @@ function isContainerRunning(serviceName: string): boolean {
   return false;
 }
 
-function isPortInUse(port: number): boolean {
-  return new Promise<boolean>((resolve) => {
-    const server = net.createServer();
-    server.once('error', () => resolve(true));
-    server.once('listening', () => {
-      server.close();
-      resolve(false);
-    });
-    server.listen(port, '0.0.0.0');
-  }) as any; // sync check below
+interface PortInfo {
+  inUse: boolean;
+  pid: string | null;
+  process: string | null;
+  isDockerInternal: boolean;
+  isDockerContainer: boolean;
+  containerName: string | null;
 }
 
-function checkPortSync(port: number): { inUse: boolean; pid: string | null; process: string | null } {
+const DOCKER_PROCESS_PATTERNS = [
+  'com.docker',
+  'docker-proxy',
+  'dockerd',
+  'containerd',
+  'vpnkit',
+  'Docker Desktop',
+];
+
+function checkPortSync(port: number): PortInfo {
   const result = exec(`lsof -i :${port} -t 2>/dev/null`);
   if (result.code !== 0 || !result.stdout.trim()) {
-    return { inUse: false, pid: null, process: null };
+    return { inUse: false, pid: null, process: null, isDockerInternal: false, isDockerContainer: false, containerName: null };
   }
 
   const pid = result.stdout.trim().split('\n')[0];
-  const psResult = exec(`ps -p ${pid} -o comm= 2>/dev/null`);
-  const processName = psResult.code === 0 ? psResult.stdout.trim() : 'unknown';
+  const psResult = exec(`ps -p ${pid} -o command= 2>/dev/null`);
+  const fullCommand = psResult.code === 0 ? psResult.stdout.trim() : 'unknown';
 
-  return { inUse: true, pid, process: processName };
+  // Extract just the process name for display
+  const psShort = exec(`ps -p ${pid} -o comm= 2>/dev/null`);
+  const processName = psShort.code === 0 ? psShort.stdout.trim() : 'unknown';
+
+  // Detect Docker's own infrastructure processes
+  const isDockerInternal = DOCKER_PROCESS_PATTERNS.some(
+    (p) => fullCommand.toLowerCase().includes(p.toLowerCase()),
+  );
+
+  // Detect if this is a docker-proxy forwarding for a container
+  let isDockerContainer = false;
+  let containerName: string | null = null;
+
+  if (fullCommand.includes('docker-proxy') || isDockerInternal) {
+    // Check if a Docker container is bound to this port
+    const containerCheck = exec(
+      `docker ps --filter "publish=${port}" --format "{{.Names}}" 2>/dev/null`,
+    );
+    if (containerCheck.code === 0 && containerCheck.stdout.trim()) {
+      isDockerContainer = true;
+      containerName = containerCheck.stdout.trim().split('\n')[0];
+    }
+  }
+
+  return { inUse: true, pid, process: processName, isDockerInternal, isDockerContainer, containerName };
 }
 
 function findFreePort(startPort: number): number {
@@ -63,15 +84,23 @@ async function resolvePortConflict(
   port: number,
   serviceName: string,
 ): Promise<{ resolved: boolean; newPort?: number }> {
-  const { pid, process: processName } = checkPortSync(port);
+  const portInfo = checkPortSync(port);
 
-  if (!pid) {
+  if (!portInfo.pid) {
     return { resolved: false };
   }
 
-  log.warn(
-    `Port ${port} is in use by ${processName || 'unknown'} (PID ${pid})`,
-  );
+  // Build a human-readable description of what's using the port
+  let description: string;
+  if (portInfo.isDockerContainer && portInfo.containerName) {
+    description = `Docker container "${portInfo.containerName}"`;
+  } else if (portInfo.isDockerInternal) {
+    description = `Docker Desktop (internal process)`;
+  } else {
+    description = `${portInfo.process || 'unknown'} (PID ${portInfo.pid})`;
+  }
+
+  log.warn(`Port ${port} is in use by ${description}`);
 
   if (ctx.nonInteractive) {
     return { resolved: false };
@@ -79,40 +108,73 @@ async function resolvePortConflict(
 
   const freePort = findFreePort(port);
 
+  // Build options based on what's using the port
+  type Action = 'stop-container' | 'kill' | 'remap' | 'skip';
+  const options: Array<{ value: Action; label: string }> = [];
+
+  if (portInfo.isDockerContainer && portInfo.containerName) {
+    // It's a container from another project — offer to stop the container (not kill Docker)
+    options.push({
+      value: 'stop-container',
+      label: `Stop container "${portInfo.containerName}" (docker stop)`,
+    });
+  } else if (portInfo.isDockerInternal) {
+    // It's Docker's own process — DO NOT offer to kill it
+    log.info('This port is managed by Docker Desktop — it cannot be stopped individually.');
+  } else {
+    // Regular process — safe to offer kill
+    options.push({
+      value: 'kill',
+      label: `Stop the process (kill PID ${portInfo.pid} — ${portInfo.process || 'unknown'})`,
+    });
+  }
+
+  options.push({
+    value: 'remap',
+    label: `Use port ${freePort} instead for ${serviceName}`,
+  });
+  options.push({
+    value: 'skip',
+    label: 'Skip — I\'ll fix it myself',
+  });
+
   const action = await select({
     message: `Port ${port} (${serviceName}) is occupied. What would you like to do?`,
-    options: [
-      {
-        value: 'kill',
-        label: `Stop the process (kill PID ${pid} — ${processName || 'unknown'})`,
-      },
-      {
-        value: 'remap',
-        label: `Use port ${freePort} instead for ${serviceName}`,
-      },
-      {
-        value: 'skip',
-        label: 'Skip — I\'ll fix it myself',
-      },
-    ],
+    options,
   });
 
   if (isCancel(action) || action === 'skip') {
     return { resolved: false };
   }
 
-  if (action === 'kill') {
-    log.info(`Stopping PID ${pid}...`);
-    const kill = exec(`kill ${pid}`);
-    if (kill.code !== 0) {
-      log.warn(`Could not stop PID ${pid}. Try: sudo kill ${pid}`);
+  if (action === 'stop-container' && portInfo.containerName) {
+    log.info(`Stopping container "${portInfo.containerName}"...`);
+    const stop = exec(`docker stop ${portInfo.containerName}`, { timeout: 15_000 });
+    if (stop.code !== 0) {
+      log.warn(`Could not stop container: ${stop.stderr}`);
       return { resolved: false };
     }
-    // Give it a moment to release the port
     await new Promise((r) => setTimeout(r, 1500));
     const recheck = checkPortSync(port);
     if (recheck.inUse) {
-      log.warn(`Port ${port} still in use after killing PID ${pid}`);
+      log.warn(`Port ${port} still in use after stopping container`);
+      return { resolved: false };
+    }
+    log.success(`Port ${port} is now free`);
+    return { resolved: true };
+  }
+
+  if (action === 'kill' && portInfo.pid) {
+    log.info(`Stopping PID ${portInfo.pid}...`);
+    const kill = exec(`kill ${portInfo.pid}`);
+    if (kill.code !== 0) {
+      log.warn(`Could not stop PID ${portInfo.pid}. Try: sudo kill ${portInfo.pid}`);
+      return { resolved: false };
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    const recheck = checkPortSync(port);
+    if (recheck.inUse) {
+      log.warn(`Port ${port} still in use after killing PID ${portInfo.pid}`);
       return { resolved: false };
     }
     log.success(`Port ${port} is now free`);
