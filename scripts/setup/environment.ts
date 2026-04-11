@@ -141,17 +141,18 @@ export async function setupEnvironment(ctx: SetupContext): Promise<void> {
         envVars.TELEGRAM_TEST_CHAT_ID = process.env.TELEGRAM_TEST_CHAT_ID || '';
       } else {
         note(
-          'Message @userinfobot on Telegram to get your numeric chat ID.\n' +
-          'This lets the seed script link your Telegram to the demo user.',
+          'Message @userinfobot on Telegram to get your chat ID.\n' +
+          'This lets the seed script link your Telegram to the demo user.\n' +
+          'For group chats (e.g. test channels), the ID will be negative.',
           'Telegram Chat ID',
         );
 
         const chatId = await text({
-          message: 'TELEGRAM_TEST_CHAT_ID (numeric)',
-          placeholder: '123456789',
+          message: 'TELEGRAM_TEST_CHAT_ID',
+          placeholder: '123456789 or -5129659862',
           validate: (v) => {
             if (!v) return undefined; // optional
-            if (!/^\d+$/.test(v)) return 'Must be a numeric ID';
+            if (!/^-?\d+$/.test(v)) return 'Must be a numeric ID (can be negative for group chats)';
             return undefined;
           },
         });
