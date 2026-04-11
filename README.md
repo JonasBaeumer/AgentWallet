@@ -254,6 +254,24 @@ Every purchase is a `PurchaseIntent` tracked through an explicit state machine. 
 
 ## Quick Start
 
+### One-command setup (recommended)
+
+The interactive setup script checks prerequisites, configures `.env`, starts Docker, runs migrations, seeds the database, validates Stripe + Telegram, and runs verification — all in one go:
+
+```bash
+git clone https://github.com/your-org/trustedpaymentinfrastructureforagents
+cd trustedpaymentinfrastructureforagents
+npm run setup
+```
+
+For CI or non-interactive environments:
+
+```bash
+npm run setup -- --non-interactive
+```
+
+Once setup completes, skip to [Start the server](#4-start-the-server) below.
+
 ### Prerequisites
 
 - **Node.js** 18+
@@ -261,11 +279,14 @@ Every purchase is a `PurchaseIntent` tracked through an explicit state machine. 
 - **Stripe account** with Issuing enabled — see [docs/stripe-setup.md](docs/stripe-setup.md) for the full walkthrough
 - **Telegram bot token** (optional) — for approval notifications and user signup; see [docs/telegram-setup.md](docs/telegram-setup.md)
 
-### 1. Install and configure
+### Manual setup
+
+<details>
+<summary>If you prefer to set up manually instead of using <code>npm run setup</code></summary>
+
+#### 1. Install and configure
 
 ```bash
-git clone https://github.com/your-org/trustedpaymentinfrastructureforagents
-cd trustedpaymentinfrastructureforagents
 npm install
 cp .env.example .env
 ```
@@ -279,18 +300,20 @@ WORKER_API_KEY=local-dev-worker-key
 
 Everything else has safe defaults for local development.
 
-### 2. Start infrastructure
+#### 2. Start infrastructure
 
 ```bash
 docker compose up -d    # starts Postgres 16 + Redis 7
 ```
 
-### 3. Migrate and seed
+#### 3. Migrate and seed
 
 ```bash
 npm run db:migrate      # creates all tables
 npm run seed            # creates demo user: demo@agentpay.dev, £1 000 balance
 ```
+
+</details>
 
 ### 4. Start the server
 
