@@ -38,11 +38,12 @@ export function exec(cmd: string, opts?: { cwd?: string; timeout?: number; env?:
 export function spawnDetached(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string },
+  opts?: { cwd?: string; env?: Record<string, string> },
 ): ChildProcess {
   const child = spawn(cmd, args, {
     cwd: opts?.cwd ?? PROJECT_ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: opts?.env ? { ...process.env, ...opts.env } : process.env,
     detached: true,
   });
   child.unref();
@@ -155,4 +156,61 @@ const PLACEHOLDER_VALUES = new Set([
 
 export function isPlaceholder(value: string | undefined): boolean {
   return !value || PLACEHOLDER_VALUES.has(value);
+}
+
+/**
+ * Run a command with real-time output streaming. Unlike exec(), this shows
+ * output as it happens (good for long-running commands like test suites).
+ * Returns a promise with the exit code and captured output.
+ */
+export function execStreaming(
+  cmd: string,
+  args: string[],
+  opts?: { cwd?: string; timeout?: number; env?: Record<string, string> },
+): Promise<ExecResult> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, {
+      cwd: opts?.cwd ?? PROJECT_ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: opts?.env ? { ...process.env, ...opts.env } : process.env,
+      shell: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    const timer = opts?.timeout
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGTERM');
+        }, opts.timeout)
+      : null;
+
+    child.stdout?.on('data', (data: Buffer) => {
+      const text = data.toString();
+      stdout += text;
+      process.stdout.write(text);
+    });
+
+    child.stderr?.on('data', (data: Buffer) => {
+      const text = data.toString();
+      stderr += text;
+      process.stderr.write(text);
+    });
+
+    child.on('close', (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        code: timedOut ? 124 : (code ?? 1),
+      });
+    });
+
+    child.on('error', (err) => {
+      if (timer) clearTimeout(timer);
+      resolve({ stdout: stdout.trim(), stderr: err.message, code: 1 });
+    });
+  });
 }

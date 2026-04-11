@@ -1,5 +1,5 @@
 import path from 'path';
-import { intro, log } from '@clack/prompts';
+import { intro, log, confirm, isCancel } from '@clack/prompts';
 import { printHeader } from './setup/ascii';
 import { checkPrerequisites } from './setup/prerequisites';
 import { setupEnvironment } from './setup/environment';
@@ -8,6 +8,7 @@ import { setupDatabase } from './setup/database';
 import { setupStripe } from './setup/stripe';
 import { setupTelegram } from './setup/telegram';
 import { runVerification } from './setup/verification';
+import { launchServices } from './setup/services';
 import { printSummary } from './setup/summary';
 import { SetupContext } from './setup/types';
 import { detectOS } from './setup/utils';
@@ -75,7 +76,21 @@ async function main(): Promise<void> {
   // Phase 7: Verification
   await runVerification(ctx);
 
-  // Phase 8: Summary
+  // Phase 8: Launch services
+  let launchNow = true;
+  if (!ctx.nonInteractive) {
+    const answer = await confirm({
+      message: 'Launch dev services now? (server, worker, webhooks)',
+      initialValue: true,
+    });
+    launchNow = !isCancel(answer) && answer;
+  }
+
+  if (launchNow) {
+    await launchServices(ctx);
+  }
+
+  // Phase 9: Summary
   printSummary(ctx);
 
   const hasFails = ctx.results.some((r) => r.status === 'fail');

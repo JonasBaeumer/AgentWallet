@@ -1,6 +1,6 @@
-import { log, confirm, spinner, isCancel } from '@clack/prompts';
+import { log, spinner } from '@clack/prompts';
 import { SetupContext } from './types';
-import { exec, commandExists, isPlaceholder, projectPath, readEnvFile, writeEnvFile, spawnDetached } from './utils';
+import { exec, isPlaceholder } from './utils';
 
 export async function setupStripe(ctx: SetupContext): Promise<void> {
   log.info('Validating Stripe configuration...');
@@ -70,93 +70,5 @@ export async function setupStripe(ctx: SetupContext): Promise<void> {
     ctx.results.push({ name: 'Issuing balance', status: 'warn', message: 'Could not retrieve' });
   }
 
-  // Stripe CLI webhook forwarding
-  if (!commandExists('stripe')) {
-    log.info('Stripe CLI not installed — skipping webhook listener setup');
-    return;
-  }
-
-  let shouldListen = false;
-  if (ctx.nonInteractive) {
-    // In non-interactive mode, don't start the listener
-    shouldListen = false;
-  } else {
-    const answer = await confirm({
-      message: 'Start Stripe CLI webhook listener? (runs in background)',
-    });
-    shouldListen = !isCancel(answer) && answer;
-  }
-
-  if (!shouldListen) return;
-
-  s.start('Starting Stripe CLI webhook listener');
-  // Pass --api-key explicitly so the CLI doesn't rely on its own
-  // login session (which may be expired or use a different key).
-  const child = spawnDetached('stripe', [
-    'listen',
-    '--forward-to',
-    `localhost:${ctx.envVars.PORT || '3000'}/v1/webhooks/stripe`,
-    '--api-key',
-    key,
-  ]);
-
-  // The whsec_ secret can appear on either stdout or stderr depending
-  // on the Stripe CLI version. Listen on both.
-  const secret = await new Promise<string | null>((resolve) => {
-    const timeout = setTimeout(() => {
-      resolve(null);
-    }, 20_000);
-    let buffer = '';
-    let errorBuffer = '';
-
-    function checkForSecret(chunk: string): void {
-      buffer += chunk;
-      const match = buffer.match(/whsec_\w+/);
-      if (match) {
-        clearTimeout(timeout);
-        resolve(match[0]);
-      }
-    }
-
-    function checkForError(chunk: string): void {
-      errorBuffer += chunk;
-      // Detect auth failures early so we don't wait the full 20s
-      if (errorBuffer.includes('level=fatal') || errorBuffer.includes('Authorization failed')) {
-        clearTimeout(timeout);
-        resolve(null);
-      }
-    }
-
-    child.stdout?.on('data', (data: Buffer) => checkForSecret(data.toString()));
-    child.stderr?.on('data', (data: Buffer) => {
-      const text = data.toString();
-      checkForSecret(text);
-      checkForError(text);
-    });
-
-    child.on('error', () => {
-      clearTimeout(timeout);
-      resolve(null);
-    });
-  });
-
-  if (secret) {
-    s.stop(`Stripe listener running (PID ${child.pid})`);
-    ctx.envVars.STRIPE_WEBHOOK_SECRET = secret;
-    writeEnvFile(ctx.envPath, ctx.envVars, projectPath('.env.example'));
-    log.success(`STRIPE_WEBHOOK_SECRET updated in .env: ${secret.slice(0, 15)}...`);
-    ctx.results.push({
-      name: 'Stripe webhook listener',
-      status: 'pass',
-      message: `Running as PID ${child.pid}`,
-    });
-  } else {
-    s.stop('Could not capture webhook secret from Stripe CLI');
-    log.warn('Run manually: stripe listen --forward-to localhost:3000/v1/webhooks/stripe');
-    ctx.results.push({
-      name: 'Stripe webhook listener',
-      status: 'warn',
-      message: 'Could not start — run manually',
-    });
-  }
+  // Stripe CLI listener is handled by the services phase (Phase 8)
 }
