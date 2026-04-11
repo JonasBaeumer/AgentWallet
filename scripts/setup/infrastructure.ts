@@ -227,18 +227,21 @@ function applyPortRemap(
   }
 }
 
-function writeOverrideFile(portOverrides: Array<{ hostPort: number; containerPort: number; service: string }>): void {
-  const fs = require('fs');
-  const path = require('path');
-
-  const overrideLines = ['version: "3.9"', 'services:'];
-  for (const { hostPort, containerPort, service } of portOverrides) {
-    overrideLines.push(`  ${service}:`, `    ports:`, `      - "${hostPort}:${containerPort}"`);
+/**
+ * Build environment variables for docker compose that override host ports.
+ * The docker-compose.yml uses ${POSTGRES_HOST_PORT:-5432} and ${REDIS_HOST_PORT:-6379}.
+ */
+function buildComposeEnv(portOverrides: Array<{ hostPort: number; containerPort: number; service: string }>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const { hostPort, service } of portOverrides) {
+    if (service === 'postgres') env.POSTGRES_HOST_PORT = String(hostPort);
+    if (service === 'redis') env.REDIS_HOST_PORT = String(hostPort);
   }
+  return env;
+}
 
-  const overridePath = path.resolve(__dirname, '..', '..', 'docker-compose.override.yml');
-  fs.writeFileSync(overridePath, overrideLines.join('\n') + '\n');
-  log.info('Created docker-compose.override.yml with remapped ports');
+function runCompose(cmd: string, composeEnv: Record<string, string>, timeout = 60_000) {
+  return exec(cmd, { timeout, env: composeEnv });
 }
 
 export async function startInfrastructure(ctx: SetupContext): Promise<void> {
@@ -291,21 +294,21 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
     return;
   }
 
-  // Write override file and force-recreate if we have remaps.
-  // Existing containers retain their old port bindings — they must be
-  // removed and recreated to pick up the override.
+  // Build env vars for port overrides (docker-compose.yml uses
+  // ${POSTGRES_HOST_PORT:-5432} and ${REDIS_HOST_PORT:-6379})
+  const composeEnv = buildComposeEnv(portOverrides);
+
+  // Force-recreate if ports were remapped so containers pick up new bindings
   if (portOverrides.length > 0) {
-    writeOverrideFile(portOverrides);
     const remappedServices = portOverrides.map((o) => o.service).join(' ');
-    log.info(`Recreating containers to apply new port mappings...`);
-    exec(`docker compose rm -f -s ${remappedServices}`, { timeout: 15_000 });
+    log.info('Recreating containers to apply new port mappings...');
+    runCompose(`docker compose rm -f -s ${remappedServices}`, composeEnv, 15_000);
   }
 
-  // Start containers (--force-recreate ensures override is applied)
   const composeCmd = portOverrides.length > 0
     ? 'docker compose up -d --force-recreate'
     : 'docker compose up -d';
-  const up = exec(composeCmd, { timeout: 60_000 });
+  const up = runCompose(composeCmd, composeEnv);
   if (up.code !== 0) {
     const stderr = up.stderr || up.stdout;
 
@@ -321,11 +324,10 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
       if (result.resolved && result.newPort && svc) {
         portOverrides.push({ hostPort: result.newPort, containerPort: svc.port, service: svc.composeService });
         applyPortRemap(ctx, svc.composeService, svc.port, result.newPort);
-        writeOverrideFile(portOverrides);
+        const retryEnv = buildComposeEnv(portOverrides);
 
-        // Remove old container and retry
-        exec(`docker compose rm -f -s ${svc.composeService}`, { timeout: 15_000 });
-        const retry = exec('docker compose up -d --force-recreate', { timeout: 60_000 });
+        runCompose(`docker compose rm -f -s ${svc.composeService}`, retryEnv, 15_000);
+        const retry = runCompose('docker compose up -d --force-recreate', retryEnv);
         if (retry.code !== 0) {
           log.error(`docker compose up failed on retry: ${retry.stderr}`);
           ctx.results.push({ name: svcName, status: 'fail', message: 'docker compose up failed after port remap' });
@@ -352,7 +354,7 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
   const redisPort = ctx.envVars.REDIS_URL?.match(/:(\d+)$/)?.[1] || '6379';
 
   const pgReady = await pollUntil(
-    () => exec('docker compose exec -T postgres pg_isready -U postgres').code === 0,
+    () => runCompose('docker compose exec -T postgres pg_isready -U postgres', composeEnv, 5000).code === 0,
     { intervalMs: 1000, timeoutMs: 30_000, label: 'Waiting for PostgreSQL' },
   );
   ctx.results.push({
@@ -362,7 +364,7 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
   });
 
   const redisReady = await pollUntil(
-    () => exec('docker compose exec -T redis redis-cli ping').stdout.includes('PONG'),
+    () => runCompose('docker compose exec -T redis redis-cli ping', composeEnv, 5000).stdout.includes('PONG'),
     { intervalMs: 1000, timeoutMs: 15_000, label: 'Waiting for Redis' },
   );
   ctx.results.push({

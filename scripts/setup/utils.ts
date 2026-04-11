@@ -16,13 +16,14 @@ export interface ExecResult {
   code: number;
 }
 
-export function exec(cmd: string, opts?: { cwd?: string; timeout?: number }): ExecResult {
+export function exec(cmd: string, opts?: { cwd?: string; timeout?: number; env?: Record<string, string> }): ExecResult {
   try {
     const stdout = execSync(cmd, {
       cwd: opts?.cwd ?? PROJECT_ROOT,
       timeout: opts?.timeout ?? 30_000,
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf-8',
+      ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
     });
     return { stdout: stdout.trim(), stderr: '', code: 0 };
   } catch (err: any) {
