@@ -90,24 +90,48 @@ export async function setupStripe(ctx: SetupContext): Promise<void> {
   if (!shouldListen) return;
 
   s.start('Starting Stripe CLI webhook listener');
+  // Pass --api-key explicitly so the CLI doesn't rely on its own
+  // login session (which may be expired or use a different key).
   const child = spawnDetached('stripe', [
     'listen',
     '--forward-to',
     `localhost:${ctx.envVars.PORT || '3000'}/v1/webhooks/stripe`,
+    '--api-key',
+    key,
   ]);
 
-  // Read stderr for the webhook signing secret
+  // The whsec_ secret can appear on either stdout or stderr depending
+  // on the Stripe CLI version. Listen on both.
   const secret = await new Promise<string | null>((resolve) => {
-    const timeout = setTimeout(() => resolve(null), 15_000);
+    const timeout = setTimeout(() => {
+      resolve(null);
+    }, 20_000);
     let buffer = '';
+    let errorBuffer = '';
 
-    child.stderr?.on('data', (data: Buffer) => {
-      buffer += data.toString();
+    function checkForSecret(chunk: string): void {
+      buffer += chunk;
       const match = buffer.match(/whsec_\w+/);
       if (match) {
         clearTimeout(timeout);
         resolve(match[0]);
       }
+    }
+
+    function checkForError(chunk: string): void {
+      errorBuffer += chunk;
+      // Detect auth failures early so we don't wait the full 20s
+      if (errorBuffer.includes('level=fatal') || errorBuffer.includes('Authorization failed')) {
+        clearTimeout(timeout);
+        resolve(null);
+      }
+    }
+
+    child.stdout?.on('data', (data: Buffer) => checkForSecret(data.toString()));
+    child.stderr?.on('data', (data: Buffer) => {
+      const text = data.toString();
+      checkForSecret(text);
+      checkForError(text);
     });
 
     child.on('error', () => {

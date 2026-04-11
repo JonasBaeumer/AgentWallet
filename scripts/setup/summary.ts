@@ -50,6 +50,10 @@ export function printSummary(ctx: SetupContext): void {
     );
   }
 
+  steps.push(
+    `${color.bold('npm run test:integration')}  Run integration tests (after Stripe + Telegram setup)`,
+  );
+
   note(steps.map((s, i) => `  ${i + 1}. ${s}`).join('\n'), 'Next Steps');
 
   // Final message
