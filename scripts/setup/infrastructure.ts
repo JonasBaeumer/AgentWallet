@@ -291,17 +291,25 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
     return;
   }
 
-  // Write override file if we have remaps
+  // Write override file and force-recreate if we have remaps.
+  // Existing containers retain their old port bindings — they must be
+  // removed and recreated to pick up the override.
   if (portOverrides.length > 0) {
     writeOverrideFile(portOverrides);
+    const remappedServices = portOverrides.map((o) => o.service).join(' ');
+    log.info(`Recreating containers to apply new port mappings...`);
+    exec(`docker compose rm -f -s ${remappedServices}`, { timeout: 15_000 });
   }
 
-  // Start containers
-  const up = exec('docker compose up -d', { timeout: 60_000 });
+  // Start containers (--force-recreate ensures override is applied)
+  const composeCmd = portOverrides.length > 0
+    ? 'docker compose up -d --force-recreate'
+    : 'docker compose up -d';
+  const up = exec(composeCmd, { timeout: 60_000 });
   if (up.code !== 0) {
     const stderr = up.stderr || up.stdout;
 
-    // If docker compose itself reports a port conflict we missed, offer resolution
+    // If docker compose reports a port conflict we missed, offer resolution
     const portMatch = stderr.match(/(\d+): bind: address already in use/);
     if (portMatch) {
       const conflictPort = parseInt(portMatch[1], 10);
@@ -315,8 +323,9 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
         applyPortRemap(ctx, svc.composeService, svc.port, result.newPort);
         writeOverrideFile(portOverrides);
 
-        // Retry docker compose up
-        const retry = exec('docker compose up -d', { timeout: 60_000 });
+        // Remove old container and retry
+        exec(`docker compose rm -f -s ${svc.composeService}`, { timeout: 15_000 });
+        const retry = exec('docker compose up -d --force-recreate', { timeout: 60_000 });
         if (retry.code !== 0) {
           log.error(`docker compose up failed on retry: ${retry.stderr}`);
           ctx.results.push({ name: svcName, status: 'fail', message: 'docker compose up failed after port remap' });
