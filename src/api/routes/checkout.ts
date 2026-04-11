@@ -16,7 +16,10 @@ export async function checkoutRoutes(fastify: FastifyInstance): Promise<void> {
     let result;
     try {
       result = await runSimulatedCheckout(parsed.data);
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === 'TestModeOnlyError') {
+        return reply.status(422).send({ error: err.message });
+      }
       fastify.log.error({ message: 'checkoutSimulator: unexpected error', error: String(err) });
       return reply.status(500).send({ error: 'Unexpected error during checkout simulation' });
     }

@@ -1,6 +1,7 @@
 // Mock Stripe client
 const mockAuthCreate = jest.fn();
 const mockAuthCapture = jest.fn();
+const mockGetStripeMode = jest.fn().mockReturnValue('test');
 const mockStripe = {
   testHelpers: {
     issuing: {
@@ -11,7 +12,10 @@ const mockStripe = {
     },
   },
 };
-jest.mock('@/payments/providers/stripe/stripeClient', () => ({ getStripeClient: () => mockStripe }));
+jest.mock('@/payments/providers/stripe/stripeClient', () => ({
+  getStripeClient: () => mockStripe,
+  getStripeMode: () => mockGetStripeMode(),
+}));
 
 // Mock Prisma
 const mockFindUniqueCard = jest.fn();
@@ -24,7 +28,7 @@ jest.mock('@/db/client', () => ({
 }));
 
 import { runSimulatedCheckout } from '@/payments/providers/stripe/checkoutSimulator';
-import { IntentNotFoundError } from '@/contracts';
+import { IntentNotFoundError, TestModeOnlyError } from '@/contracts';
 
 const CARD_ID = 'ic_test123';
 const validParams = {
@@ -143,6 +147,33 @@ describe('runSimulatedCheckout — card declined', () => {
     await runSimulatedCheckout(validParams);
 
     expect(mockAuthCapture).not.toHaveBeenCalled();
+  });
+});
+
+describe('runSimulatedCheckout — live mode guard', () => {
+  beforeEach(() => {
+    mockGetStripeMode.mockReturnValue('live');
+  });
+
+  afterEach(() => {
+    mockGetStripeMode.mockReturnValue('test');
+  });
+
+  it('throws TestModeOnlyError in live mode', async () => {
+    await expect(runSimulatedCheckout(validParams)).rejects.toThrow(TestModeOnlyError);
+  });
+
+  it('does not call Stripe APIs in live mode', async () => {
+    await runSimulatedCheckout(validParams).catch(() => {});
+
+    expect(mockAuthCreate).not.toHaveBeenCalled();
+    expect(mockAuthCapture).not.toHaveBeenCalled();
+  });
+
+  it('does not query the database in live mode', async () => {
+    await runSimulatedCheckout(validParams).catch(() => {});
+
+    expect(mockFindUniqueCard).not.toHaveBeenCalled();
   });
 });
 

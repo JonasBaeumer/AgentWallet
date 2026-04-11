@@ -122,7 +122,7 @@ const card = await stripe.issuing.cards.create(
 );
 ```
 
-### Retrieve card number (test mode only)
+### Retrieve card number (virtual cards — works in both test and live mode)
 
 Card numbers are **not returned by default** — you must explicitly expand:
 
@@ -133,8 +133,13 @@ const card = await stripe.issuing.cards.retrieve(cardId, {
 // card.number and card.cvc are now populated
 ```
 
-In production, never retrieve raw card numbers server-side. Use Stripe.js for client-side display.
-For this hackathon (test mode only), server-side expand is acceptable.
+Stripe allows server-side retrieval of `number` and `cvc` for **virtual cards** in both test
+and live mode ([docs](https://docs.stripe.com/issuing/cards/virtual/issue-cards#retrieve-virtual-card-details)).
+This restriction only applies to physical cards, which cannot be expanded in live mode.
+Since this project only issues virtual cards, server-side expand is the correct approach.
+
+Note: if generating virtual cards for end users, PCI-DSS Service Provider obligations may
+apply. See Stripe's guidance on Issuing Elements for a PCI-scope-reducing alternative.
 
 ### Spending controls shape
 

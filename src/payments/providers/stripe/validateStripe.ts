@@ -1,4 +1,5 @@
 import Stripe from 'stripe';
+import { getStripeMode } from './stripeClient';
 import { logger } from '@/config/logger';
 
 const log = logger.child({ module: 'payments/stripe/validateStripe' });
@@ -31,8 +32,12 @@ export async function validateStripeSetup(): Promise<void> {
     return;
   }
 
-  const mode = key.startsWith('sk_live_') ? 'live' : 'test';
+  const mode = getStripeMode();
   log.info(`Stripe Issuing is enabled (mode: ${mode})`);
+
+  if (mode === 'live') {
+    log.info('Live mode: checkout simulation endpoint is disabled — real authorizations arrive via Stripe webhooks');
+  }
 
   try {
     const balance = await stripe.balance.retrieve();
