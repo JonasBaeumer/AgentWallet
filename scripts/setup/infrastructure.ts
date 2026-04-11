@@ -1,6 +1,8 @@
-import { log, confirm, select, isCancel } from '@clack/prompts';
+import net from 'net';
+import { log, select, isCancel } from '@clack/prompts';
 import { SetupContext } from './types';
 import { exec, pollUntil } from './utils';
+
 function isContainerRunning(serviceName: string): boolean {
   const result = exec(`docker compose ps --format json ${serviceName}`);
   if (result.code !== 0) return false;
@@ -34,31 +36,56 @@ const DOCKER_PROCESS_PATTERNS = [
   'Docker Desktop',
 ];
 
-function checkPortSync(port: number): PortInfo {
+/**
+ * Check if a port is in use by attempting a TCP connect.
+ * This is reliable regardless of how the process binds (works for
+ * native Postgres, Docker, etc. on macOS and Linux).
+ */
+function isPortListening(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(1000);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once('error', () => {
+      resolve(false);
+    });
+    socket.connect(port, '127.0.0.1');
+  });
+}
+
+/**
+ * Try to identify what's using a port via lsof. This may return no results
+ * on macOS for some processes — callers should not rely on this as the
+ * sole port-in-use check.
+ */
+function identifyPortProcess(port: number): Omit<PortInfo, 'inUse'> {
   const result = exec(`lsof -i :${port} -t 2>/dev/null`);
   if (result.code !== 0 || !result.stdout.trim()) {
-    return { inUse: false, pid: null, process: null, isDockerInternal: false, isDockerContainer: false, containerName: null };
+    return { pid: null, process: null, isDockerInternal: false, isDockerContainer: false, containerName: null };
   }
 
   const pid = result.stdout.trim().split('\n')[0];
   const psResult = exec(`ps -p ${pid} -o command= 2>/dev/null`);
   const fullCommand = psResult.code === 0 ? psResult.stdout.trim() : 'unknown';
 
-  // Extract just the process name for display
   const psShort = exec(`ps -p ${pid} -o comm= 2>/dev/null`);
   const processName = psShort.code === 0 ? psShort.stdout.trim() : 'unknown';
 
-  // Detect Docker's own infrastructure processes
   const isDockerInternal = DOCKER_PROCESS_PATTERNS.some(
     (p) => fullCommand.toLowerCase().includes(p.toLowerCase()),
   );
 
-  // Detect if this is a docker-proxy forwarding for a container
   let isDockerContainer = false;
   let containerName: string | null = null;
 
   if (fullCommand.includes('docker-proxy') || isDockerInternal) {
-    // Check if a Docker container is bound to this port
     const containerCheck = exec(
       `docker ps --filter "publish=${port}" --format "{{.Names}}" 2>/dev/null`,
     );
@@ -68,36 +95,35 @@ function checkPortSync(port: number): PortInfo {
     }
   }
 
-  return { inUse: true, pid, process: processName, isDockerInternal, isDockerContainer, containerName };
+  return { pid, process: processName, isDockerInternal, isDockerContainer, containerName };
 }
 
 function findFreePort(startPort: number): number {
+  // Use a synchronous connect check via exec for simplicity in this sync context
   for (let port = startPort + 1; port < startPort + 100; port++) {
-    const { inUse } = checkPortSync(port);
-    if (!inUse) return port;
+    const result = exec(`nc -z 127.0.0.1 ${port} 2>/dev/null`);
+    if (result.code !== 0) return port; // nc fails = port is free
   }
   return startPort + 1;
 }
 
-async function resolvePortConflict(
+async function offerPortResolution(
   ctx: SetupContext,
   port: number,
   serviceName: string,
 ): Promise<{ resolved: boolean; newPort?: number }> {
-  const portInfo = checkPortSync(port);
+  const processInfo = identifyPortProcess(port);
 
-  if (!portInfo.pid) {
-    return { resolved: false };
-  }
-
-  // Build a human-readable description of what's using the port
+  // Build description
   let description: string;
-  if (portInfo.isDockerContainer && portInfo.containerName) {
-    description = `Docker container "${portInfo.containerName}"`;
-  } else if (portInfo.isDockerInternal) {
+  if (processInfo.isDockerContainer && processInfo.containerName) {
+    description = `Docker container "${processInfo.containerName}"`;
+  } else if (processInfo.isDockerInternal) {
     description = `Docker Desktop (internal process)`;
+  } else if (processInfo.pid) {
+    description = `${processInfo.process || 'unknown'} (PID ${processInfo.pid})`;
   } else {
-    description = `${portInfo.process || 'unknown'} (PID ${portInfo.pid})`;
+    description = 'another process (could not identify — possibly a native service like Postgres.app or Homebrew Postgres)';
   }
 
   log.warn(`Port ${port} is in use by ${description}`);
@@ -108,27 +134,23 @@ async function resolvePortConflict(
 
   const freePort = findFreePort(port);
 
-  // Build options based on what's using the port
   type Action = 'stop-container' | 'kill' | 'remap' | 'skip';
   const options: Array<{ value: Action; label: string }> = [];
 
-  if (portInfo.isDockerContainer && portInfo.containerName) {
-    // It's a container from another project — offer to stop the container (not kill Docker)
+  if (processInfo.isDockerContainer && processInfo.containerName) {
     options.push({
       value: 'stop-container',
-      label: `Stop container "${portInfo.containerName}" (docker stop)`,
+      label: `Stop container "${processInfo.containerName}" (docker stop)`,
     });
-  } else if (portInfo.isDockerInternal) {
-    // It's Docker's own process — DO NOT offer to kill it
+  } else if (processInfo.isDockerInternal) {
     log.info('This port is managed by Docker Desktop — it cannot be stopped individually.');
-  } else {
-    // Regular process — safe to offer kill
+  } else if (processInfo.pid) {
     options.push({
       value: 'kill',
-      label: `Stop the process (kill PID ${portInfo.pid} — ${portInfo.process || 'unknown'})`,
+      label: `Stop the process (kill PID ${processInfo.pid} — ${processInfo.process || 'unknown'})`,
     });
   }
-
+  // Remap is always available
   options.push({
     value: 'remap',
     label: `Use port ${freePort} instead for ${serviceName}`,
@@ -147,16 +169,15 @@ async function resolvePortConflict(
     return { resolved: false };
   }
 
-  if (action === 'stop-container' && portInfo.containerName) {
-    log.info(`Stopping container "${portInfo.containerName}"...`);
-    const stop = exec(`docker stop ${portInfo.containerName}`, { timeout: 15_000 });
+  if (action === 'stop-container' && processInfo.containerName) {
+    log.info(`Stopping container "${processInfo.containerName}"...`);
+    const stop = exec(`docker stop ${processInfo.containerName}`, { timeout: 15_000 });
     if (stop.code !== 0) {
       log.warn(`Could not stop container: ${stop.stderr}`);
       return { resolved: false };
     }
     await new Promise((r) => setTimeout(r, 1500));
-    const recheck = checkPortSync(port);
-    if (recheck.inUse) {
+    if (await isPortListening(port)) {
       log.warn(`Port ${port} still in use after stopping container`);
       return { resolved: false };
     }
@@ -164,17 +185,16 @@ async function resolvePortConflict(
     return { resolved: true };
   }
 
-  if (action === 'kill' && portInfo.pid) {
-    log.info(`Stopping PID ${portInfo.pid}...`);
-    const kill = exec(`kill ${portInfo.pid}`);
+  if (action === 'kill' && processInfo.pid) {
+    log.info(`Stopping PID ${processInfo.pid}...`);
+    const kill = exec(`kill ${processInfo.pid}`);
     if (kill.code !== 0) {
-      log.warn(`Could not stop PID ${portInfo.pid}. Try: sudo kill ${portInfo.pid}`);
+      log.warn(`Could not stop PID ${processInfo.pid}. Try: sudo kill ${processInfo.pid}`);
       return { resolved: false };
     }
     await new Promise((r) => setTimeout(r, 1500));
-    const recheck = checkPortSync(port);
-    if (recheck.inUse) {
-      log.warn(`Port ${port} still in use after killing PID ${portInfo.pid}`);
+    if (await isPortListening(port)) {
+      log.warn(`Port ${port} still in use after killing PID ${processInfo.pid}`);
       return { resolved: false };
     }
     log.success(`Port ${port} is now free`);
@@ -186,6 +206,39 @@ async function resolvePortConflict(
   }
 
   return { resolved: false };
+}
+
+function applyPortRemap(
+  ctx: SetupContext,
+  composeService: string,
+  originalPort: number,
+  newPort: number,
+): void {
+  if (composeService === 'postgres') {
+    ctx.envVars.DATABASE_URL = ctx.envVars.DATABASE_URL.replace(
+      `:${originalPort}/`,
+      `:${newPort}/`,
+    );
+  } else if (composeService === 'redis') {
+    ctx.envVars.REDIS_URL = ctx.envVars.REDIS_URL.replace(
+      `:${originalPort}`,
+      `:${newPort}`,
+    );
+  }
+}
+
+function writeOverrideFile(portOverrides: Array<{ hostPort: number; containerPort: number; service: string }>): void {
+  const fs = require('fs');
+  const path = require('path');
+
+  const overrideLines = ['version: "3.9"', 'services:'];
+  for (const { hostPort, containerPort, service } of portOverrides) {
+    overrideLines.push(`  ${service}:`, `    ports:`, `      - "${hostPort}:${containerPort}"`);
+  }
+
+  const overridePath = path.resolve(__dirname, '..', '..', 'docker-compose.override.yml');
+  fs.writeFileSync(overridePath, overrideLines.join('\n') + '\n');
+  log.info('Created docker-compose.override.yml with remapped ports');
 }
 
 export async function startInfrastructure(ctx: SetupContext): Promise<void> {
@@ -201,21 +254,21 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
     return;
   }
 
-  // Check for port conflicts before starting
   const services: Array<{ name: string; port: number; composeService: string }> = [
     { name: 'PostgreSQL', port: 5432, composeService: 'postgres' },
     { name: 'Redis', port: 6379, composeService: 'redis' },
   ];
 
-  let portOverrides: string[] = [];
+  const portOverrides: Array<{ hostPort: number; containerPort: number; service: string }> = [];
 
+  // Pre-flight port check using TCP connect (catches everything lsof misses)
   for (const svc of services) {
     if (isContainerRunning(svc.composeService)) continue;
 
-    const { inUse } = checkPortSync(svc.port);
-    if (!inUse) continue;
+    const listening = await isPortListening(svc.port);
+    if (!listening) continue;
 
-    const result = await resolvePortConflict(ctx, svc.port, svc.name);
+    const result = await offerPortResolution(ctx, svc.port, svc.name);
 
     if (!result.resolved) {
       ctx.results.push({
@@ -223,101 +276,72 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
         status: 'fail',
         message: `Port ${svc.port} is in use — resolve the conflict and re-run setup`,
       });
-      // Don't return yet — check all ports first
       continue;
     }
 
     if (result.newPort) {
-      portOverrides.push(`${result.newPort}:${svc.port}`);
+      portOverrides.push({ hostPort: result.newPort, containerPort: svc.port, service: svc.composeService });
+      applyPortRemap(ctx, svc.composeService, svc.port, result.newPort);
       log.info(`${svc.name} will use host port ${result.newPort} → container port ${svc.port}`);
-
-      // Update DATABASE_URL or REDIS_URL in envVars to reflect new port
-      if (svc.composeService === 'postgres') {
-        ctx.envVars.DATABASE_URL = ctx.envVars.DATABASE_URL.replace(
-          `:${svc.port}/`,
-          `:${result.newPort}/`,
-        );
-      } else if (svc.composeService === 'redis') {
-        ctx.envVars.REDIS_URL = ctx.envVars.REDIS_URL.replace(
-          `:${svc.port}`,
-          `:${result.newPort}`,
-        );
-      }
     }
   }
 
   // If any ports are still unresolved, bail
-  const portFails = ctx.results.filter(
-    (r) => r.status === 'fail' && r.message.includes('Port'),
-  );
-  if (portFails.length > 0) {
+  if (ctx.results.some((r) => r.status === 'fail' && r.message.includes('Port'))) {
     return;
   }
 
-  // Build docker compose command with port overrides if needed
-  let composeCmd = 'docker compose up -d';
+  // Write override file if we have remaps
   if (portOverrides.length > 0) {
-    // Use environment variable overrides for port remapping
-    // docker compose allows overriding ports via command line
-    const overrideArgs = portOverrides
-      .map((o) => {
-        const [hostPort, containerPort] = o.split(':');
-        if (containerPort === '5432') return `-e POSTGRES_PORT=${hostPort}`;
-        if (containerPort === '6379') return `-e REDIS_PORT=${hostPort}`;
-        return '';
-      })
-      .filter(Boolean);
-
-    if (overrideArgs.length > 0) {
-      // For port remapping, we need to use docker compose with --scale or override files
-      // The simplest reliable approach: create a temporary override
-      const overrideLines = ['version: "3.9"', 'services:'];
-      for (const o of portOverrides) {
-        const [hostPort, containerPort] = o.split(':');
-        if (containerPort === '5432') {
-          overrideLines.push('  postgres:', `    ports:`, `      - "${hostPort}:5432"`);
-        }
-        if (containerPort === '6379') {
-          overrideLines.push('  redis:', `    ports:`, `      - "${hostPort}:6379"`);
-        }
-      }
-
-      const fs = require('fs');
-      const path = require('path');
-      const overridePath = path.resolve(__dirname, '..', '..', 'docker-compose.override.yml');
-      fs.writeFileSync(overridePath, overrideLines.join('\n') + '\n');
-      log.info('Created docker-compose.override.yml with remapped ports');
-    }
+    writeOverrideFile(portOverrides);
   }
 
   // Start containers
-  const up = exec(composeCmd, { timeout: 60_000 });
+  const up = exec('docker compose up -d', { timeout: 60_000 });
   if (up.code !== 0) {
-    const stderr = up.stderr;
+    const stderr = up.stderr || up.stdout;
 
-    // Check if it's a port conflict we didn't catch
+    // If docker compose itself reports a port conflict we missed, offer resolution
     const portMatch = stderr.match(/(\d+): bind: address already in use/);
     if (portMatch) {
       const conflictPort = parseInt(portMatch[1], 10);
-      log.error(`Port ${conflictPort} is still in use`);
-      ctx.results.push({
-        name: 'Infrastructure',
-        status: 'fail',
-        message: `Port ${conflictPort} conflict — stop the process using it or re-run setup to pick a different port`,
-      });
+      const svc = services.find((s) => s.port === conflictPort);
+      const svcName = svc?.name || `port ${conflictPort}`;
+
+      const result = await offerPortResolution(ctx, conflictPort, svcName);
+
+      if (result.resolved && result.newPort && svc) {
+        portOverrides.push({ hostPort: result.newPort, containerPort: svc.port, service: svc.composeService });
+        applyPortRemap(ctx, svc.composeService, svc.port, result.newPort);
+        writeOverrideFile(portOverrides);
+
+        // Retry docker compose up
+        const retry = exec('docker compose up -d', { timeout: 60_000 });
+        if (retry.code !== 0) {
+          log.error(`docker compose up failed on retry: ${retry.stderr}`);
+          ctx.results.push({ name: svcName, status: 'fail', message: 'docker compose up failed after port remap' });
+          return;
+        }
+      } else {
+        ctx.results.push({
+          name: svcName,
+          status: 'fail',
+          message: `Port ${conflictPort} conflict — stop the process using it or re-run setup`,
+        });
+        return;
+      }
     } else {
       log.error(`docker compose up failed: ${stderr}`);
       ctx.results.push({ name: 'PostgreSQL', status: 'fail', message: 'docker compose up failed' });
       ctx.results.push({ name: 'Redis', status: 'fail', message: 'docker compose up failed' });
+      return;
     }
-    return;
   }
 
-  // Determine which ports to health-check
+  // Health checks
   const pgPort = ctx.envVars.DATABASE_URL?.match(/:(\d+)\//)?.[1] || '5432';
   const redisPort = ctx.envVars.REDIS_URL?.match(/:(\d+)$/)?.[1] || '6379';
 
-  // Health-check Postgres
   const pgReady = await pollUntil(
     () => exec('docker compose exec -T postgres pg_isready -U postgres').code === 0,
     { intervalMs: 1000, timeoutMs: 30_000, label: 'Waiting for PostgreSQL' },
@@ -328,7 +352,6 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
     message: pgReady ? `Healthy (port ${pgPort})` : 'Timed out — check `docker compose logs postgres`',
   });
 
-  // Health-check Redis
   const redisReady = await pollUntil(
     () => exec('docker compose exec -T redis redis-cli ping').stdout.includes('PONG'),
     { intervalMs: 1000, timeoutMs: 15_000, label: 'Waiting for Redis' },
@@ -339,7 +362,7 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
     message: redisReady ? `Healthy (port ${redisPort})` : 'Timed out — check `docker compose logs redis`',
   });
 
-  // If ports were remapped, update .env file
+  // Persist env changes if ports were remapped
   if (portOverrides.length > 0) {
     const { writeEnvFile, projectPath } = require('./utils');
     writeEnvFile(ctx.envPath, ctx.envVars, projectPath('.env.example'));
