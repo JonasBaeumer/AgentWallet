@@ -1,7 +1,7 @@
 import Stripe from 'stripe';
-import { getStripeClient } from './stripeClient';
+import { getStripeClient, getStripeMode } from './stripeClient';
 import { prisma } from '@/db/client';
-import { IntentNotFoundError } from '@/contracts';
+import { IntentNotFoundError, TestModeOnlyError } from '@/contracts';
 import { logger } from '@/config/logger';
 
 const log = logger.child({ module: 'payments/stripe/checkoutSimulator' });
@@ -21,6 +21,10 @@ export async function runSimulatedCheckout(params: {
   currency: string;
   merchantName: string;
 }): Promise<SimulatedCheckoutResult> {
+  if (getStripeMode() === 'live') {
+    throw new TestModeOnlyError('Checkout simulation');
+  }
+
   const stripe = getStripeClient();
   const { intentId, amount, currency, merchantName } = params;
 

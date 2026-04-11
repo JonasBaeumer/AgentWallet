@@ -100,6 +100,22 @@ describe('valid key with Issuing enabled', () => {
     );
   });
 
+  it('logs disabled simulation info when in live mode', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_live_real_key';
+    await validateStripeSetup();
+    expect(mockInfo).toHaveBeenCalledWith(
+      expect.stringContaining('checkout simulation endpoint is disabled'),
+    );
+  });
+
+  it('does not log simulation warning in test mode', async () => {
+    await validateStripeSetup();
+    const simCalls = mockInfo.mock.calls.filter(
+      (c: string[]) => typeof c[0] === 'string' && c[0].includes('simulation'),
+    );
+    expect(simCalls).toHaveLength(0);
+  });
+
   it('does not warn', async () => {
     await validateStripeSetup();
     expect(mockWarn).not.toHaveBeenCalled();

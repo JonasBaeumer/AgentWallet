@@ -111,7 +111,7 @@ export async function revealCard(intentId: string): Promise<CardReveal> {
   if (!card) throw new IntentNotFoundError(intentId);
   if (card.revealedAt) throw new CardAlreadyRevealedError(intentId);
 
-  // Retrieve card with expanded number and CVC (test mode only)
+  // Retrieve card with expanded number and CVC (works for virtual cards in both test and live mode)
   let stripeCard: Stripe.Issuing.Card;
   try {
     stripeCard = await stripe.issuing.cards.retrieve(card.stripeCardId, {

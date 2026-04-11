@@ -19,6 +19,13 @@ export class InvalidApprovalStateError extends Error {
   }
 }
 
+export class TestModeOnlyError extends Error {
+  constructor(operation: string) {
+    super(`${operation} is only available in Stripe test mode. In live mode, real merchant charges trigger authorization webhooks.`);
+    this.name = 'TestModeOnlyError';
+  }
+}
+
 export class InsufficientIssuingBalanceError extends Error {
   public readonly available: number;
   public readonly required: number;
