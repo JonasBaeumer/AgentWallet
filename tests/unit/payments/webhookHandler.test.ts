@@ -51,13 +51,19 @@ describe('signature verification', () => {
   it('throws when STRIPE_WEBHOOK_SECRET is not set', async () => {
     const saved = process.env.STRIPE_WEBHOOK_SECRET;
     delete process.env.STRIPE_WEBHOOK_SECRET;
-    await expect(handleStripeEvent(RAW_BODY, SIGNATURE)).rejects.toThrow('STRIPE_WEBHOOK_SECRET not set');
+    await expect(handleStripeEvent(RAW_BODY, SIGNATURE)).rejects.toThrow(
+      'STRIPE_WEBHOOK_SECRET not set',
+    );
     process.env.STRIPE_WEBHOOK_SECRET = saved;
   });
 
   it('throws when constructEvent rejects the signature', async () => {
-    mockConstructEvent.mockImplementation(() => { throw new Error('bad sig'); });
-    await expect(handleStripeEvent(RAW_BODY, SIGNATURE)).rejects.toThrow('Webhook signature verification failed');
+    mockConstructEvent.mockImplementation(() => {
+      throw new Error('bad sig');
+    });
+    await expect(handleStripeEvent(RAW_BODY, SIGNATURE)).rejects.toThrow(
+      'Webhook signature verification failed',
+    );
   });
 
   it('passes rawBody, signature, and secret to constructEvent', async () => {
@@ -150,17 +156,23 @@ describe('issuing_transaction.created reconciliation', () => {
     mockReconcileIntent.mockResolvedValue({ inSync: true, discrepancies: [] });
     await handleStripeEvent(RAW_BODY, SIGNATURE);
     // Allow fire-and-forget to settle
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     expect(mockReconcileIntent).toHaveBeenCalledWith('intent-recon');
   });
 
   it('logs RECONCILIATION_DISCREPANCY when reconcileIntent returns inSync:false', async () => {
     const discrepancies = ['settledAmount 3500 != stripe captured 4000'];
-    const report = { inSync: false, discrepancies, intentId: 'intent-recon', internal: {}, stripe: null };
+    const report = {
+      inSync: false,
+      discrepancies,
+      intentId: 'intent-recon',
+      internal: {},
+      stripe: null,
+    };
     mockReconcileIntent.mockResolvedValue(report);
 
     await handleStripeEvent(RAW_BODY, SIGNATURE);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(mockAuditCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -176,7 +188,7 @@ describe('issuing_transaction.created reconciliation', () => {
     mockReconcileIntent.mockRejectedValue(new Error('stripe down'));
 
     const result = await handleStripeEvent(RAW_BODY, SIGNATURE);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(result).toEqual({ received: true });
   });

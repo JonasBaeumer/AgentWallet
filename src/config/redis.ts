@@ -23,7 +23,11 @@ export function createRedisConnection(): Redis {
 }
 
 // Returns a plain config object for BullMQ (avoids ioredis version conflicts)
-export function getRedisConnectionConfig(): { host: string; port: number; maxRetriesPerRequest: null } {
+export function getRedisConnectionConfig(): {
+  host: string;
+  port: number;
+  maxRetriesPerRequest: null;
+} {
   const url = new URL(process.env.REDIS_URL || 'redis://localhost:6379');
   return {
     host: url.hostname,

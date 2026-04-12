@@ -25,7 +25,10 @@ export class StripePaymentProvider implements IPaymentProvider {
     return cancelCard(intentId);
   }
 
-  async handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>> {
+  async handleWebhookEvent(
+    rawBody: Buffer | string,
+    signature: string,
+  ): Promise<Record<string, unknown>> {
     return handleStripeEvent(rawBody, signature);
   }
 

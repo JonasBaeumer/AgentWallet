@@ -6,7 +6,12 @@ jest.mock('@/db/client', () => ({
   },
 }));
 
-import { IntentStatus, IntentEvent, IllegalTransitionError, IntentNotFoundError } from '@/contracts';
+import {
+  IntentStatus,
+  IntentEvent,
+  IllegalTransitionError,
+  IntentNotFoundError,
+} from '@/contracts';
 import { transitionIntent } from '@/orchestrator/stateMachine';
 import { prisma } from '@/db/client';
 
@@ -44,7 +49,9 @@ describe('transitionIntent', () => {
       return fn(txMock);
     });
 
-    await expect(transitionIntent('nonexistent', IntentEvent.INTENT_CREATED)).rejects.toThrow(IntentNotFoundError);
+    await expect(transitionIntent('nonexistent', IntentEvent.INTENT_CREATED)).rejects.toThrow(
+      IntentNotFoundError,
+    );
   });
 
   it('throws IllegalTransitionError for invalid transition', async () => {
@@ -58,7 +65,9 @@ describe('transitionIntent', () => {
       return fn(txMock);
     });
 
-    await expect(transitionIntent('intent-1', IntentEvent.USER_APPROVED)).rejects.toThrow(IllegalTransitionError);
+    await expect(transitionIntent('intent-1', IntentEvent.USER_APPROVED)).rejects.toThrow(
+      IllegalTransitionError,
+    );
   });
 
   it('writes AuditEvent on every transition', async () => {
@@ -78,8 +87,10 @@ describe('transitionIntent', () => {
 
     await transitionIntent('intent-1', IntentEvent.INTENT_CREATED);
     expect(auditCreateMock).toHaveBeenCalledTimes(1);
-    expect(auditCreateMock).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ intentId: 'intent-1', event: IntentEvent.INTENT_CREATED }),
-    }));
+    expect(auditCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ intentId: 'intent-1', event: IntentEvent.INTENT_CREATED }),
+      }),
+    );
   });
 });

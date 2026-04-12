@@ -115,7 +115,10 @@ describe('POST /v1/webhooks/telegram', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/webhooks/telegram',
-      headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'wrong-secret' },
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'wrong-secret',
+      },
       body: JSON.stringify({ update_id: 1 }),
     });
 
@@ -126,7 +129,10 @@ describe('POST /v1/webhooks/telegram', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/webhooks/telegram',
-      headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'test-webhook-secret' },
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'test-webhook-secret',
+      },
       body: JSON.stringify({ update_id: 1, message: { text: 'hello' } }),
     });
 
@@ -138,13 +144,21 @@ describe('POST /v1/webhooks/telegram', () => {
   it('invokes handleTelegramCallback for callback_query update', async () => {
     const update = {
       update_id: 2,
-      callback_query: { id: 'cb1', data: 'approve:intent-1', from: { id: 111 }, message: { message_id: 10, chat: { id: 999 } } },
+      callback_query: {
+        id: 'cb1',
+        data: 'approve:intent-1',
+        from: { id: 111 },
+        message: { message_id: 10, chat: { id: 999 } },
+      },
     };
 
     const res = await app.inject({
       method: 'POST',
       url: '/v1/webhooks/telegram',
-      headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'test-webhook-secret' },
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'test-webhook-secret',
+      },
       body: JSON.stringify(update),
     });
 
@@ -157,13 +171,21 @@ describe('POST /v1/webhooks/telegram', () => {
     mockHandleTelegramCallback.mockRejectedValueOnce(new Error('handler error'));
     const update = {
       update_id: 3,
-      callback_query: { id: 'cb2', data: 'approve:intent-2', from: { id: 111 }, message: { message_id: 10, chat: { id: 999 } } },
+      callback_query: {
+        id: 'cb2',
+        data: 'approve:intent-2',
+        from: { id: 111 },
+        message: { message_id: 10, chat: { id: 999 } },
+      },
     };
 
     const res = await app.inject({
       method: 'POST',
       url: '/v1/webhooks/telegram',
-      headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': 'test-webhook-secret' },
+      headers: {
+        'content-type': 'application/json',
+        'x-telegram-bot-api-secret-token': 'test-webhook-secret',
+      },
       body: JSON.stringify(update),
     });
 

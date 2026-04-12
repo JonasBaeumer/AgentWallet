@@ -24,8 +24,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_TEST_CHAT_ID = process.env.TELEGRAM_TEST_CHAT_ID;
 const isMockEnv = process.env.TELEGRAM_MOCK === 'true';
 
-const describeIfTelegram =
-  TELEGRAM_TOKEN && !isMockEnv ? describe : describe.skip;
+const describeIfTelegram = TELEGRAM_TOKEN && !isMockEnv ? describe : describe.skip;
 
 const BASE = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
@@ -108,9 +107,7 @@ describeIfTelegram('Telegram Bot API infrastructure', () => {
       if (info.last_error_message) {
         console.log(
           'last_error_date:',
-          info.last_error_date
-            ? new Date(info.last_error_date * 1000).toISOString()
-            : '(unknown)',
+          info.last_error_date ? new Date(info.last_error_date * 1000).toISOString() : '(unknown)',
         );
       }
 
@@ -144,9 +141,7 @@ describeIfTelegram('Telegram Bot API infrastructure', () => {
             );
           }
         : () => {
-            console.log(
-              'Step 3.1 skipped — set TELEGRAM_TEST_CHAT_ID in .env to enable',
-            );
+            console.log('Step 3.1 skipped — set TELEGRAM_TEST_CHAT_ID in .env to enable');
           },
     );
 

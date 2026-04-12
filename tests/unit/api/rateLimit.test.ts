@@ -63,10 +63,17 @@ jest.mock('@/ledger/potService', () => ({
 jest.mock('@/payments', () => ({
   getPaymentProvider: () => ({
     issueCard: jest.fn().mockResolvedValue({
-      id: 'vc-1', intentId: 'intent-1', stripeCardId: 'ic_test', last4: '4242',
+      id: 'vc-1',
+      intentId: 'intent-1',
+      stripeCardId: 'ic_test',
+      last4: '4242',
     }),
     revealCard: jest.fn().mockResolvedValue({
-      number: '4242424242424242', cvc: '123', expMonth: 12, expYear: 2027, last4: '4242',
+      number: '4242424242424242',
+      cvc: '123',
+      expMonth: 12,
+      expYear: 2027,
+      last4: '4242',
     }),
     freezeCard: jest.fn().mockResolvedValue(undefined),
     cancelCard: jest.fn().mockResolvedValue(undefined),
@@ -80,7 +87,10 @@ jest.mock('@/payments/providers/stripe/stripeClient', () => ({
 
 jest.mock('@/payments/providers/stripe/checkoutSimulator', () => ({
   runSimulatedCheckout: jest.fn().mockResolvedValue({
-    success: true, chargeId: 'pi_rate_test', amount: 5000, currency: 'eur',
+    success: true,
+    chargeId: 'pi_rate_test',
+    amount: 5000,
+    currency: 'eur',
   }),
 }));
 
@@ -104,9 +114,14 @@ let TEST_KEY_HASH: string;
 
 const dbUsers: Record<string, any> = {
   'user-rl': {
-    id: 'user-rl', email: 'ratelimit@agentpay.dev', mainBalance: 100000,
-    maxBudgetPerIntent: 50000, merchantAllowlist: [], mccAllowlist: [],
-    apiKeyHash: null, apiKeyPrefix: TEST_KEY_PREFIX,
+    id: 'user-rl',
+    email: 'ratelimit@agentpay.dev',
+    mainBalance: 100000,
+    maxBudgetPerIntent: 50000,
+    merchantAllowlist: [],
+    mccAllowlist: [],
+    apiKeyHash: null,
+    apiKeyPrefix: TEST_KEY_PREFIX,
   },
 };
 const dbIntents: Record<string, any> = {};
@@ -119,7 +134,9 @@ jest.mock('@/db/client', () => ({
       findUnique: jest.fn(({ where }: any) => {
         if (where.id) return Promise.resolve(dbUsers[where.id] ?? null);
         if (where.apiKeyPrefix) {
-          const found = Object.values(dbUsers).find((u: any) => u.apiKeyPrefix === where.apiKeyPrefix);
+          const found = Object.values(dbUsers).find(
+            (u: any) => u.apiKeyPrefix === where.apiKeyPrefix,
+          );
           return Promise.resolve(found ?? null);
         }
         return Promise.resolve(null);
@@ -128,7 +145,12 @@ jest.mock('@/db/client', () => ({
     },
     purchaseIntent: {
       create: jest.fn(({ data }: any) => {
-        const intent = { id: `intent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ...data, createdAt: new Date(), updatedAt: new Date() };
+        const intent = {
+          id: `intent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          ...data,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
         dbIntents[intent.id] = intent;
         return Promise.resolve(intent);
       }),
@@ -211,7 +233,8 @@ async function fireRequests(
 ) {
   const responses = [];
   for (let i = 0; i < count; i++) {
-    const dynamicHeaders = typeof opts.headers === 'function' ? opts.headers(i) : (opts.headers ?? {});
+    const dynamicHeaders =
+      typeof opts.headers === 'function' ? opts.headers(i) : (opts.headers ?? {});
     const injectOpts: any = {
       method,
       url,
@@ -320,7 +343,10 @@ describe('Per-route: POST /v1/intents (max 10 per auth:ip)', () => {
     const ip = '10.2.0.1';
     const responses = await fireRequests('POST', '/v1/intents', 11, {
       ip,
-      headers: (i: number) => ({ authorization: AUTH_HEADER, 'x-idempotency-key': `idem-intents-${i}` }),
+      headers: (i: number) => ({
+        authorization: AUTH_HEADER,
+        'x-idempotency-key': `idem-intents-${i}`,
+      }),
       body: (i: number) => ({
         query: `headphones ${i}`,
         maxBudget: 10000,

@@ -9,7 +9,9 @@ const mockStripe = {
     constructEvent: jest.fn(),
   },
 };
-jest.mock('@/payments/providers/stripe/stripeClient', () => ({ getStripeClient: () => mockStripe }));
+jest.mock('@/payments/providers/stripe/stripeClient', () => ({
+  getStripeClient: () => mockStripe,
+}));
 
 // Mock prisma
 jest.mock('@/db/client', () => ({
@@ -21,7 +23,12 @@ jest.mock('@/db/client', () => ({
   },
 }));
 
-import { issueVirtualCard, revealCard, freezeCard, cancelCard } from '@/payments/providers/stripe/cardService';
+import {
+  issueVirtualCard,
+  revealCard,
+  freezeCard,
+  cancelCard,
+} from '@/payments/providers/stripe/cardService';
 import { prisma } from '@/db/client';
 import { CardAlreadyRevealedError, IntentNotFoundError } from '@/contracts';
 
@@ -30,15 +37,36 @@ const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 // Helper: a user with no pre-existing cardholder (first issuance)
 const newUser = { id: 'user-1', email: 'test@example.com', stripeCardholderId: null };
 // Helper: a user that already has a cardholder from a previous intent
-const returningUser = { id: 'user-2', email: 'returning@example.com', stripeCardholderId: 'ich_existing' };
+const returningUser = {
+  id: 'user-2',
+  email: 'returning@example.com',
+  stripeCardholderId: 'ich_existing',
+};
 
 function setupHappyPathMocks(intentId: string, user = newUser) {
-  (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ id: intentId, user, currency: 'gbp', query: 'test headphones', subject: null });
+  (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
+    id: intentId,
+    user,
+    currency: 'gbp',
+    query: 'test headphones',
+    subject: null,
+  });
   mockStripe.issuing.cardholders.create.mockResolvedValue({ id: 'ich_new' });
-  mockStripe.issuing.cards.create.mockResolvedValue({ id: 'ic_123', last4: '4242', exp_month: 12, exp_year: 2027 });
-  (mockPrisma.user.update as jest.Mock).mockResolvedValue({ ...user, stripeCardholderId: 'ich_new' });
+  mockStripe.issuing.cards.create.mockResolvedValue({
+    id: 'ic_123',
+    last4: '4242',
+    exp_month: 12,
+    exp_year: 2027,
+  });
+  (mockPrisma.user.update as jest.Mock).mockResolvedValue({
+    ...user,
+    stripeCardholderId: 'ich_new',
+  });
   (mockPrisma.virtualCard.create as jest.Mock).mockResolvedValue({
-    id: 'vc-1', intentId, stripeCardId: 'ic_123', last4: '4242',
+    id: 'vc-1',
+    intentId,
+    stripeCardId: 'ic_123',
+    last4: '4242',
   });
 }
 
@@ -75,14 +103,25 @@ describe('issueVirtualCard', () => {
   });
 
   it('does not store PAN or CVC in DB', async () => {
-    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ id: 'intent-1', user: newUser, currency: 'gbp', query: 'test', subject: null });
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
+      id: 'intent-1',
+      user: newUser,
+      currency: 'gbp',
+      query: 'test',
+      subject: null,
+    });
     mockStripe.issuing.cardholders.create.mockResolvedValue({ id: 'ich_new' });
     mockStripe.issuing.cards.create.mockResolvedValue({
-      id: 'ic_123', last4: '1234', number: '4242424242424242', cvc: '123',
+      id: 'ic_123',
+      last4: '1234',
+      number: '4242424242424242',
+      cvc: '123',
     });
     (mockPrisma.user.update as jest.Mock).mockResolvedValue({});
     (mockPrisma.virtualCard.create as jest.Mock).mockResolvedValue({
-      id: 'vc-1', stripeCardId: 'ic_123', last4: '1234',
+      id: 'vc-1',
+      stripeCardId: 'ic_123',
+      last4: '1234',
     });
 
     await issueVirtualCard('intent-1', 10000, 'gbp');
@@ -95,7 +134,9 @@ describe('issueVirtualCard', () => {
   it('throws IntentNotFoundError for missing intent', async () => {
     (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue(null);
 
-    await expect(issueVirtualCard('missing-intent', 10000, 'gbp')).rejects.toThrow(IntentNotFoundError);
+    await expect(issueVirtualCard('missing-intent', 10000, 'gbp')).rejects.toThrow(
+      IntentNotFoundError,
+    );
   });
 
   it('passes MCC allowlist to spending controls', async () => {
@@ -154,11 +195,18 @@ describe('issueVirtualCard', () => {
 
   it('reuses existing cardholderId and does NOT call cardholders.create for returning user', async () => {
     (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
-      id: 'intent-returning', user: returningUser, currency: 'gbp', query: 'test', subject: null,
+      id: 'intent-returning',
+      user: returningUser,
+      currency: 'gbp',
+      query: 'test',
+      subject: null,
     });
     mockStripe.issuing.cards.create.mockResolvedValue({ id: 'ic_456', last4: '9999' });
     (mockPrisma.virtualCard.create as jest.Mock).mockResolvedValue({
-      id: 'vc-2', intentId: 'intent-returning', stripeCardId: 'ic_456', last4: '9999',
+      id: 'vc-2',
+      intentId: 'intent-returning',
+      stripeCardId: 'ic_456',
+      last4: '9999',
     });
 
     await issueVirtualCard('intent-returning', 8000, 'gbp');
@@ -176,17 +224,32 @@ describe('revealCard', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('throws CardAlreadyRevealedError on second call', async () => {
-    const mockCard = { intentId: 'intent-1', stripeCardId: 'ic_123', last4: '4242', revealedAt: new Date() };
+    const mockCard = {
+      intentId: 'intent-1',
+      stripeCardId: 'ic_123',
+      last4: '4242',
+      revealedAt: new Date(),
+    };
     (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue(mockCard);
 
     await expect(revealCard('intent-1')).rejects.toThrow(CardAlreadyRevealedError);
   });
 
   it('sets revealedAt on first call', async () => {
-    const mockCard = { intentId: 'intent-1', stripeCardId: 'ic_123', last4: '4242', revealedAt: null };
+    const mockCard = {
+      intentId: 'intent-1',
+      stripeCardId: 'ic_123',
+      last4: '4242',
+      revealedAt: null,
+    };
     (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue(mockCard);
     mockStripe.issuing.cards.retrieve.mockResolvedValue({
-      id: 'ic_123', last4: '4242', exp_month: 12, exp_year: 2027, number: '4242424242424242', cvc: '123',
+      id: 'ic_123',
+      last4: '4242',
+      exp_month: 12,
+      exp_year: 2027,
+      number: '4242424242424242',
+      cvc: '123',
     });
     (mockPrisma.virtualCard.update as jest.Mock).mockResolvedValue({});
 
@@ -210,10 +273,20 @@ describe('revealCard', () => {
   });
 
   it('expands number and cvc when retrieving from Stripe', async () => {
-    const mockCard = { intentId: 'intent-1', stripeCardId: 'ic_456', last4: '9999', revealedAt: null };
+    const mockCard = {
+      intentId: 'intent-1',
+      stripeCardId: 'ic_456',
+      last4: '9999',
+      revealedAt: null,
+    };
     (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue(mockCard);
     mockStripe.issuing.cards.retrieve.mockResolvedValue({
-      id: 'ic_456', last4: '9999', exp_month: 6, exp_year: 2028, number: '5555555555554444', cvc: '456',
+      id: 'ic_456',
+      last4: '9999',
+      exp_month: 6,
+      exp_year: 2028,
+      number: '5555555555554444',
+      cvc: '456',
     });
     (mockPrisma.virtualCard.update as jest.Mock).mockResolvedValue({});
 
@@ -284,6 +357,8 @@ describe('webhookHandler', () => {
     });
 
     const { handleStripeEvent } = require('@/payments/providers/stripe/webhookHandler');
-    await expect(handleStripeEvent(Buffer.from('{}'), 'bad-sig')).rejects.toThrow('Webhook signature verification failed');
+    await expect(handleStripeEvent(Buffer.from('{}'), 'bad-sig')).rejects.toThrow(
+      'Webhook signature verification failed',
+    );
   });
 });

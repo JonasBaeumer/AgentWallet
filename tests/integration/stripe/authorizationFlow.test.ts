@@ -22,9 +22,8 @@ import Stripe from 'stripe';
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
 
 // Skip entire suite if no real key is present (unit test environment)
-const describeIfStripe = STRIPE_KEY && !STRIPE_KEY.includes('placeholder')
-  ? describe
-  : describe.skip;
+const describeIfStripe =
+  STRIPE_KEY && !STRIPE_KEY.includes('placeholder') ? describe : describe.skip;
 
 let stripe: Stripe;
 let cardholderId: string;
@@ -140,7 +139,14 @@ describeIfStripe('Stripe testHelpers authorization flow', () => {
     console.log('status:', auth.status);
     if (auth.request_history?.length) {
       for (const h of auth.request_history) {
-        console.log('  history — reason:', h.reason, '| msg:', h.reason_message, '| approved:', h.approved);
+        console.log(
+          '  history — reason:',
+          h.reason,
+          '| msg:',
+          h.reason_message,
+          '| approved:',
+          h.approved,
+        );
       }
     } else {
       console.log('request_history: (empty)');
@@ -151,7 +157,9 @@ describeIfStripe('Stripe testHelpers authorization flow', () => {
     } else if (auth.request_history?.some((h: any) => h.reason === 'webhook_error')) {
       console.log('✗ webhook_error — server likely returned wrong response or signature mismatch');
     } else {
-      console.log('? auth declined but no webhook_error — Stripe may be ignoring the response body');
+      console.log(
+        '? auth declined but no webhook_error — Stripe may be ignoring the response body',
+      );
     }
 
     await stripe.testHelpers.issuing.authorizations.expire(auth.id).catch(() => {});

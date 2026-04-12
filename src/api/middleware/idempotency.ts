@@ -1,7 +1,10 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '@/db/client';
 
-export async function idempotencyMiddleware(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+export async function idempotencyMiddleware(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
   const idempotencyKey = request.headers['x-idempotency-key'] as string | undefined;
   if (!idempotencyKey) return; // not required for all routes, just skip
 

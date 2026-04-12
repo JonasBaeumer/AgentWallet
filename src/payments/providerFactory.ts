@@ -21,7 +21,7 @@ export function getPaymentProvider(): IPaymentProvider {
     throw new Error(`Unknown payment provider: "${name}". Valid values: stripe, mock`);
   }
 
-  return _provider;
+  return _provider!;
 }
 
 export function resetPaymentProvider(): void {

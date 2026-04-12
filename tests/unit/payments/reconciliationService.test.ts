@@ -5,7 +5,9 @@ const mockStripe = {
     transactions: { list: jest.fn() },
   },
 };
-jest.mock('@/payments/providers/stripe/stripeClient', () => ({ getStripeClient: () => mockStripe }));
+jest.mock('@/payments/providers/stripe/stripeClient', () => ({
+  getStripeClient: () => mockStripe,
+}));
 
 // Mock prisma before imports
 const mockPot = jest.fn();
@@ -72,7 +74,9 @@ describe('reconcileIntent', () => {
     const report = await reconcileIntent('intent-3');
 
     expect(report.inSync).toBe(false);
-    expect(report.discrepancies.some(d => d.includes('expects card canceled but got active'))).toBe(true);
+    expect(
+      report.discrepancies.some((d) => d.includes('expects card canceled but got active')),
+    ).toBe(true);
   });
 
   it('returns stripe:null and inSync:true when no VirtualCard exists', async () => {

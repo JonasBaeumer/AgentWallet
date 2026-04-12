@@ -145,7 +145,10 @@ describe('/start <code> handling', () => {
     await handleTelegramMessage(makeUpdate('/start CLAIMED1'));
 
     expect(mockSetSession).not.toHaveBeenCalled();
-    expect(mockSendMessage).toHaveBeenCalledWith(chatId, expect.stringContaining('already been used'));
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      chatId,
+      expect.stringContaining('already been used'),
+    );
   });
 
   it('sends generic instructions when /start has no code', async () => {
@@ -159,7 +162,11 @@ describe('/start <code> handling', () => {
 // ─── Awaiting-confirmation step ───────────────────────────────────────────────
 
 describe('awaiting_confirmation step', () => {
-  const confirmSession = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
+  const confirmSession = {
+    step: 'awaiting_confirmation' as const,
+    agentId: 'ag_test',
+    pairingCode: 'ABCD1234',
+  };
 
   it('reminds the user to use buttons when they send free text', async () => {
     mockGetSession.mockResolvedValue(confirmSession);
@@ -174,14 +181,23 @@ describe('awaiting_confirmation step', () => {
 // ─── Email step handling ──────────────────────────────────────────────────────
 
 describe('email step handling', () => {
-  const validSession = { step: 'awaiting_email' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
+  const validSession = {
+    step: 'awaiting_email' as const,
+    agentId: 'ag_test',
+    pairingCode: 'ABCD1234',
+  };
 
   it('creates user and marks code claimed on valid email', async () => {
     mockGetSession.mockResolvedValue(validSession);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: null,
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: null,
     });
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'user-new', email: 'alice@example.com' });
+    (mockPrisma.user.create as jest.Mock).mockResolvedValue({
+      id: 'user-new',
+      email: 'alice@example.com',
+    });
     (mockPrisma.pairingCode.update as jest.Mock).mockResolvedValue({});
 
     await handleTelegramMessage(makeUpdate('alice@example.com'));
@@ -213,9 +229,14 @@ describe('email step handling', () => {
   it('includes agentId in the confirmation message', async () => {
     mockGetSession.mockResolvedValue(validSession);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: null,
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: null,
     });
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'user-new', email: 'alice@example.com' });
+    (mockPrisma.user.create as jest.Mock).mockResolvedValue({
+      id: 'user-new',
+      email: 'alice@example.com',
+    });
     (mockPrisma.pairingCode.update as jest.Mock).mockResolvedValue({});
 
     await handleTelegramMessage(makeUpdate('alice@example.com'));
@@ -230,9 +251,14 @@ describe('email step handling', () => {
   it('emits AGENT_LINKED audit event on successful signup', async () => {
     mockGetSession.mockResolvedValue(validSession);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: null,
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: null,
     });
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'user-new', email: 'alice@example.com' });
+    (mockPrisma.user.create as jest.Mock).mockResolvedValue({
+      id: 'user-new',
+      email: 'alice@example.com',
+    });
     (mockPrisma.pairingCode.update as jest.Mock).mockResolvedValue({});
 
     await handleTelegramMessage(makeUpdate('alice@example.com'));
@@ -250,9 +276,14 @@ describe('email step handling', () => {
   it('normalises email to lowercase', async () => {
     mockGetSession.mockResolvedValue(validSession);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: null,
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: null,
     });
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'user-new', email: 'alice@example.com' });
+    (mockPrisma.user.create as jest.Mock).mockResolvedValue({
+      id: 'user-new',
+      email: 'alice@example.com',
+    });
     (mockPrisma.pairingCode.update as jest.Mock).mockResolvedValue({});
 
     await handleTelegramMessage(makeUpdate('Alice@EXAMPLE.COM'));
@@ -274,7 +305,9 @@ describe('email step handling', () => {
   it('handles duplicate email gracefully', async () => {
     mockGetSession.mockResolvedValue(validSession);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: null,
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: null,
     });
     const err = new Error('Unique constraint') as any;
     err.code = 'P2002';
@@ -289,14 +322,19 @@ describe('email step handling', () => {
     mockGetSession.mockResolvedValue(validSession);
     // Simulate another session claiming the code between confirm and email steps
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: 'other-user',
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: 'other-user',
     });
 
     await handleTelegramMessage(makeUpdate('alice@example.com'));
 
     expect(mockPrisma.user.create).not.toHaveBeenCalled();
     expect(mockClearSession).toHaveBeenCalledWith(chatId);
-    expect(mockSendMessage).toHaveBeenCalledWith(chatId, expect.stringContaining('already claimed'));
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      chatId,
+      expect.stringContaining('already claimed'),
+    );
   });
 
   it('prompts to /start if no session exists', async () => {

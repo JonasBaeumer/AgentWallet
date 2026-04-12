@@ -73,6 +73,7 @@ function makeSignedPayload(type: string, object: Record<string, unknown>) {
 let app: FastifyInstance;
 
 beforeAll(async () => {
+  process.env.STRIPE_SECRET_KEY = 'sk_test_fake_key_for_unit_test';
   process.env.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET;
   app = buildApp();
   await app.ready();
@@ -87,7 +88,9 @@ afterAll(async () => {
 describe('real signature verification', () => {
   it('rejects a tampered payload (wrong signature)', async () => {
     const { payload } = makeSignedPayload('issuing_authorization.request', {
-      id: 'iauth_1', amount: 5000, metadata: {},
+      id: 'iauth_1',
+      amount: 5000,
+      metadata: {},
     });
     const res = await app.inject({
       method: 'POST',
@@ -102,7 +105,9 @@ describe('real signature verification', () => {
 
   it('rejects when payload is altered after signing', async () => {
     const { signature } = makeSignedPayload('issuing_authorization.request', {
-      id: 'iauth_1', amount: 5000, metadata: {},
+      id: 'iauth_1',
+      amount: 5000,
+      metadata: {},
     });
     const tamperedPayload = JSON.stringify({ tampered: true });
     const res = await app.inject({
@@ -121,7 +126,9 @@ describe('real signature verification', () => {
 describe('issuing_authorization.request with real signature', () => {
   it('returns { approved: true } with Stripe-Version header', async () => {
     const { payload, signature } = makeSignedPayload('issuing_authorization.request', {
-      id: 'iauth_2', amount: 5000, metadata: { intentId: 'intent-real-sig-1' },
+      id: 'iauth_2',
+      amount: 5000,
+      metadata: { intentId: 'intent-real-sig-1' },
     });
     const res = await app.inject({
       method: 'POST',
@@ -141,7 +148,8 @@ describe('issuing_authorization.request with real signature', () => {
     const payload =
       '{\n  "id": "evt_ws_test",\n  "object": "event",\n  "api_version": "2024-06-20",\n' +
       '  "type": "issuing_authorization.request",\n  "data": { "object": ' +
-      JSON.stringify(object) + ' }\n}';
+      JSON.stringify(object) +
+      ' }\n}';
     const signature = stripeForSigning.webhooks.generateTestHeaderString({
       payload,
       secret: WEBHOOK_SECRET,
@@ -162,7 +170,9 @@ describe('issuing_authorization.request with real signature', () => {
 describe('other event types with real signature', () => {
   it('returns { received: true } for issuing_authorization.created', async () => {
     const { payload, signature } = makeSignedPayload('issuing_authorization.created', {
-      id: 'iauth_4', amount: 5000, metadata: { intentId: 'intent-real-sig-2' },
+      id: 'iauth_4',
+      amount: 5000,
+      metadata: { intentId: 'intent-real-sig-2' },
     });
     const res = await app.inject({
       method: 'POST',
@@ -176,7 +186,9 @@ describe('other event types with real signature', () => {
 
   it('returns { received: true } for issuing_transaction.created', async () => {
     const { payload, signature } = makeSignedPayload('issuing_transaction.created', {
-      id: 'itxn_1', amount: 3000, metadata: { intentId: 'intent-real-sig-3' },
+      id: 'itxn_1',
+      amount: 3000,
+      metadata: { intentId: 'intent-real-sig-3' },
     });
     const res = await app.inject({
       method: 'POST',
