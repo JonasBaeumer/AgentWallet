@@ -3,6 +3,9 @@ import { getStripeClient } from './stripeClient';
 import { buildSpendingControls } from './spendingControls';
 import { prisma } from '@/db/client';
 import { VirtualCardData, CardReveal, CardAlreadyRevealedError, IntentNotFoundError } from '@/contracts';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'payments/stripe/cardService' });
 
 interface IssueCardOptions {
   mccAllowlist?: string[];
@@ -51,7 +54,7 @@ export async function issueVirtualCard(
       });
     } catch (err) {
       if (err instanceof Stripe.errors.StripeError) {
-        console.error(JSON.stringify({ level: 'error', message: 'Cardholder create failed', type: err.type, code: err.code, intentId }));
+        log.error({ intentId, type: err.type, code: err.code, err }, 'Cardholder create failed');
       }
       throw err;
     }
@@ -84,7 +87,7 @@ export async function issueVirtualCard(
     );
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      console.error(JSON.stringify({ level: 'error', message: 'Card create failed', type: err.type, code: err.code, intentId }));
+      log.error({ intentId, type: err.type, code: err.code, err }, 'Card create failed');
     }
     throw err;
   }
@@ -116,7 +119,7 @@ export async function revealCard(intentId: string): Promise<CardReveal> {
     });
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      console.error(JSON.stringify({ level: 'error', message: 'Failed to retrieve card details', type: err.type, code: err.code, intentId }));
+      log.error({ intentId, type: err.type, code: err.code, err }, 'Failed to retrieve card details');
     }
     throw err;
   }
@@ -146,7 +149,7 @@ export async function freezeCard(intentId: string): Promise<void> {
     await stripe.issuing.cards.update(card.stripeCardId, { status: 'inactive' });
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      console.error(JSON.stringify({ level: 'error', message: 'Failed to freeze card', type: err.type, code: err.code, intentId }));
+      log.error({ intentId, type: err.type, code: err.code, err }, 'Failed to freeze card');
     }
     throw err;
   }
@@ -158,16 +161,25 @@ export async function freezeCard(intentId: string): Promise<void> {
 }
 
 export async function cancelCard(intentId: string): Promise<void> {
-  const stripe = getStripeClient();
-
   const card = await prisma.virtualCard.findUnique({ where: { intentId } });
   if (!card) throw new IntentNotFoundError(intentId);
 
+  // Guard 1: already cancelled in our DB — nothing to do
+  if (card.cancelledAt) return;
+
+  const stripe = getStripeClient();
   try {
     await stripe.issuing.cards.update(card.stripeCardId, { status: 'canceled' });
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      console.error(JSON.stringify({ level: 'error', message: 'Failed to cancel card', type: err.type, code: err.code, intentId }));
+      // Guard 2: card was already cancelled externally (e.g. Stripe dashboard)
+      // Stripe returns StripeInvalidRequestError in this case — treat as success
+      if (err instanceof Stripe.errors.StripeInvalidRequestError) {
+        log.warn({ intentId }, 'Card already cancelled externally — marking in DB');
+        await prisma.virtualCard.update({ where: { intentId }, data: { cancelledAt: new Date() } });
+        return;
+      }
+      log.error({ intentId, type: err.type, code: err.code, err }, 'Failed to cancel card');
     }
     throw err;
   }

@@ -1,6 +1,9 @@
 import { prisma } from '@/db/client';
 import { IntentStatus, IntentEvent, PurchaseIntentData, IntentNotFoundError } from '@/contracts';
 import { getNextStatus } from './transitions';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'orchestrator/stateMachine' });
 
 export interface TransitionResult {
   intent: PurchaseIntentData;
@@ -34,6 +37,8 @@ export async function transitionIntent(
         payload: { previousStatus, newStatus, ...payload } as any,
       },
     });
+
+    log.info({ intentId, event, previousStatus, newStatus, actor }, 'Intent transition');
 
     return {
       intent: updated as unknown as PurchaseIntentData,

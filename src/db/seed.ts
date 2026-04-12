@@ -2,6 +2,9 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'db/seed' });
 
 const prisma = new PrismaClient();
 
@@ -37,20 +40,20 @@ async function main() {
   });
 
   if (existing) {
-    console.warn('WARNING: API key rotated — the previous key is now invalid. Save the new key printed above.');
+    log.warn('WARNING: API key rotated — the previous key is now invalid. Save the new key printed above.');
   }
 
   const chatIdNote = user.telegramChatId
     ? user.telegramChatId
     : '(not set — add TELEGRAM_TEST_CHAT_ID to .env and re-run seed to receive Telegram notifications)';
 
-  console.log(JSON.stringify({ level: 'info', message: 'Seeded demo user', userId: user.id, email: user.email, telegramChatId: chatIdNote }));
+  log.info({ userId: user.id, email: user.email, telegramChatId: chatIdNote }, 'Seeded demo user');
   console.log(`Demo user API key (save this): ${rawKey}`);
 }
 
 main()
   .catch((e) => {
-    console.error(JSON.stringify({ level: 'error', message: 'Seed failed', error: String(e) }));
+    log.error({ err: e }, 'Seed failed');
     process.exit(1);
   })
   .finally(async () => {

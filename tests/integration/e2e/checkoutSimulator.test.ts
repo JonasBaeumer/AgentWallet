@@ -28,7 +28,7 @@
  */
 
 import { prisma } from '@/db/client';
-import { getRedisClient } from '@/config/redis';
+import { getRedisClient, disconnectRedis } from '@/config/redis';
 import { createStripeProvider } from '@/payments/testHelpers';
 import { IntentStatus } from '@/contracts';
 
@@ -57,7 +57,7 @@ const RUN_ID = Date.now();
 
 afterAll(async () => {
   await prisma.$disconnect();
-  getRedisClient().disconnect();
+  disconnectRedis();
 });
 
 testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {

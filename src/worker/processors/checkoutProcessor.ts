@@ -1,6 +1,9 @@
 import { Worker, Job } from 'bullmq';
 import { getRedisConnectionConfig } from '@/config/redis';
 import { CheckoutIntentJob } from '@/contracts';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'worker/processors/checkoutProcessor' });
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
 const WORKER_KEY = process.env.WORKER_API_KEY || 'local-dev-worker-key';
@@ -10,7 +13,7 @@ export function createCheckoutWorker(): Worker {
     'checkout-queue',
     async (job: Job<CheckoutIntentJob>) => {
       const { intentId, price } = job.data;
-      console.log(JSON.stringify({ level: 'info', message: 'Processing checkout job', intentId }));
+      log.info({ intentId }, 'Processing checkout job');
 
       // Simulate checkout work
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -32,11 +35,11 @@ export function createCheckoutWorker(): Worker {
 
       if (!response.ok) {
         const body = await response.text();
-        console.error(JSON.stringify({ level: 'error', message: 'Result post failed', intentId, status: response.status, body }));
+        log.error({ intentId, status: response.status, body }, 'Result post failed');
         throw new Error(`Failed to post result: ${response.status}`);
       }
 
-      console.log(JSON.stringify({ level: 'info', message: 'Checkout job completed', intentId }));
+      log.info({ intentId }, 'Checkout job completed');
     },
     { connection: getRedisConnectionConfig(), concurrency: 5 },
   );

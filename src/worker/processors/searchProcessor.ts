@@ -1,6 +1,9 @@
 import { Worker, Job } from 'bullmq';
 import { getRedisConnectionConfig } from '@/config/redis';
 import { SearchIntentJob } from '@/contracts';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'worker/processors/searchProcessor' });
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
 const WORKER_KEY = process.env.WORKER_API_KEY || 'local-dev-worker-key';
@@ -10,7 +13,7 @@ export function createSearchWorker(): Worker {
     'search-queue',
     async (job: Job<SearchIntentJob>) => {
       const { intentId, maxBudget, currency } = job.data;
-      console.log(JSON.stringify({ level: 'info', message: 'Processing search job', intentId }));
+      log.info({ intentId }, 'Processing search job');
 
       // Post a stub quote immediately
       const response = await fetch(`${API_BASE}/v1/agent/quote`, {
@@ -30,12 +33,12 @@ export function createSearchWorker(): Worker {
 
       if (!response.ok) {
         const body = await response.text();
-        console.log(JSON.stringify({ level: 'warn', message: 'Quote post failed', intentId, status: response.status, body }));
+        log.warn({ intentId, status: response.status, body }, 'Quote post failed');
         // Don't throw — intent may already be in AWAITING_APPROVAL or later
         return;
       }
 
-      console.log(JSON.stringify({ level: 'info', message: 'Search job completed — quote posted', intentId }));
+      log.info({ intentId }, 'Search job completed — quote posted');
     },
     { connection: getRedisConnectionConfig(), concurrency: 5 },
   );
