@@ -14,7 +14,10 @@ export async function getIssuingBalance(currency: string): Promise<IssuingBalanc
     balance = await stripe.balance.retrieve();
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      log.error({ type: err.type, code: err.code, err }, 'Failed to retrieve Stripe Issuing balance');
+      log.error(
+        { type: err.type, code: err.code, err },
+        'Failed to retrieve Stripe Issuing balance',
+      );
     }
     throw err;
   }

@@ -203,7 +203,6 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
       const captured = await stripeCtx.stripe.testHelpers.issuing.authorizations.capture(auth.id);
       expect(captured.status).toBe('closed');
     });
-
   });
 
   // ─── 3. runSimulatedCheckout ─────────────────────────────────────────────────

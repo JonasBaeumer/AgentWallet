@@ -13,7 +13,9 @@ export { resetPaymentProvider };
 export function createStripeProvider() {
   return {
     provider: new StripePaymentProvider(),
-    get stripe() { return getStripeClient(); },
+    get stripe() {
+      return getStripeClient();
+    },
     runSimulatedCheckout,
   };
 }

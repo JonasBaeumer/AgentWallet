@@ -32,11 +32,7 @@ import { requestApproval, recordDecision } from '@/approval/approvalService';
 import { sendApprovalRequest } from '@/telegram/notificationService';
 import { createStripeProvider } from '@/payments/testHelpers';
 import { reserveForIntent, settleIntent } from '@/ledger/potService';
-import {
-  markCardIssued,
-  startCheckout,
-  completeCheckout,
-} from '@/orchestrator/intentService';
+import { markCardIssued, startCheckout, completeCheckout } from '@/orchestrator/intentService';
 import { IntentStatus, ApprovalDecisionType } from '@/contracts';
 import { getTelegramMockCalls, clearTelegramMockCalls } from '@/telegram/mockBot';
 
@@ -44,11 +40,9 @@ const stripeCtx = createStripeProvider();
 
 // -- Skip conditions ----------------------------------------------------------
 const hasStripeKey = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_');
-const isMockMode =
-  process.env.TELEGRAM_MOCK === 'true' || !process.env.TELEGRAM_BOT_TOKEN;
+const isMockMode = process.env.TELEGRAM_MOCK === 'true' || !process.env.TELEGRAM_BOT_TOKEN;
 const hasTelegram =
-  isMockMode ||
-  (!!process.env.TELEGRAM_BOT_TOKEN && !!process.env.TELEGRAM_TEST_CHAT_ID);
+  isMockMode || (!!process.env.TELEGRAM_BOT_TOKEN && !!process.env.TELEGRAM_TEST_CHAT_ID);
 
 const testSuite = hasStripeKey && hasTelegram ? describe : describe.skip;
 
@@ -67,9 +61,7 @@ const APPROVAL_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 2_000;
 
 // Use a synthetic chat ID in mock mode
-const TEST_CHAT_ID = isMockMode
-  ? '999999999'
-  : process.env.TELEGRAM_TEST_CHAT_ID!;
+const TEST_CHAT_ID = isMockMode ? '999999999' : process.env.TELEGRAM_TEST_CHAT_ID!;
 
 // -- Teardown -----------------------------------------------------------------
 afterAll(async () => {
@@ -225,10 +217,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
       }
 
       const intent = await prisma.purchaseIntent.findUniqueOrThrow({ where: { id: intentId } });
-      expect([
-        IntentStatus.CARD_ISSUED,
-        IntentStatus.CHECKOUT_RUNNING,
-      ]).toContain(intent.status);
+      expect([IntentStatus.CARD_ISSUED, IntentStatus.CHECKOUT_RUNNING]).toContain(intent.status);
     },
     isMockMode ? 30_000 : APPROVAL_TIMEOUT_MS + 30_000,
   );
@@ -249,35 +238,29 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
   });
 
   // -- Step 6 -- Simulated checkout via Stripe test helpers -------------------
-  it(
-    'creates a real Stripe authorization and captures it (simulated checkout)',
-    async () => {
-      // Stripe test mode: freshly created individual cardholders need ~3 s to
-      // settle before authorizations are approved
-      console.log('Waiting 3 s for cardholder verification to settle...');
-      await new Promise((r) => setTimeout(r, 3000));
+  it('creates a real Stripe authorization and captures it (simulated checkout)', async () => {
+    // Stripe test mode: freshly created individual cardholders need ~3 s to
+    // settle before authorizations are approved
+    console.log('Waiting 3 s for cardholder verification to settle...');
+    await new Promise((r) => setTimeout(r, 3000));
 
-      const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
+    const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
 
-      const auth = await stripeCtx.stripe.testHelpers.issuing.authorizations.create({
-        card: card.stripeCardId,
-        amount: CHECKOUT_AMOUNT,
-        currency: CURRENCY,
-        merchant_data: { name: MERCHANT_NAME },
-      });
+    const auth = await stripeCtx.stripe.testHelpers.issuing.authorizations.create({
+      card: card.stripeCardId,
+      amount: CHECKOUT_AMOUNT,
+      currency: CURRENCY,
+      merchant_data: { name: MERCHANT_NAME },
+    });
 
-      expect(auth.approved).toBe(true);
-      expect(auth.status).toBe('pending');
-      console.log(
-        `Authorization approved: ${auth.id} (EUR${(CHECKOUT_AMOUNT / 100).toFixed(2)})`,
-      );
+    expect(auth.approved).toBe(true);
+    expect(auth.status).toBe('pending');
+    console.log(`Authorization approved: ${auth.id} (EUR${(CHECKOUT_AMOUNT / 100).toFixed(2)})`);
 
-      const captured = await stripeCtx.stripe.testHelpers.issuing.authorizations.capture(auth.id);
-      expect(captured.status).toBe('closed');
-      console.log(`Transaction captured.`);
-    },
-    30_000,
-  );
+    const captured = await stripeCtx.stripe.testHelpers.issuing.authorizations.capture(auth.id);
+    expect(captured.status).toBe('closed');
+    console.log(`Transaction captured.`);
+  }, 30_000);
 
   // -- Step 7 -- Finalize intent + settle ledger ------------------------------
   it('finalizes the intent and settles the ledger', async () => {
