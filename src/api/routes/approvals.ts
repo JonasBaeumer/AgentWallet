@@ -1,4 +1,4 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { idempotencyMiddleware, saveIdempotencyResponse } from '@/api/middleware/idempotency';
 import { userAuthMiddleware } from '@/api/middleware/userAuth';
 import { approvalDecisionSchema } from '@/api/validators/approvals';

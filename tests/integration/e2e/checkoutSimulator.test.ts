@@ -28,7 +28,7 @@
  */
 
 import { prisma } from '@/db/client';
-import { getRedisClient, disconnectRedis } from '@/config/redis';
+import { disconnectRedis } from '@/config/redis';
 import { createStripeProvider } from '@/payments/testHelpers';
 import { IntentStatus } from '@/contracts';
 
