@@ -11,7 +11,9 @@ const mockStripe = {
     },
   },
 };
-jest.mock('@/payments/providers/stripe/stripeClient', () => ({ getStripeClient: () => mockStripe }));
+jest.mock('@/payments/providers/stripe/stripeClient', () => ({
+  getStripeClient: () => mockStripe,
+}));
 
 // Mock Prisma
 const mockFindUniqueCard = jest.fn();
@@ -160,7 +162,11 @@ describe('runSimulatedCheckout — error cases', () => {
   });
 
   it('rethrows Stripe errors from authorization capture', async () => {
-    mockAuthCreate.mockResolvedValue({ id: 'iauth_capture_err', approved: true, request_history: [] });
+    mockAuthCreate.mockResolvedValue({
+      id: 'iauth_capture_err',
+      approved: true,
+      request_history: [],
+    });
     mockAuthCapture.mockRejectedValue(new Error('Capture failed'));
 
     await expect(runSimulatedCheckout(validParams)).rejects.toThrow('Capture failed');

@@ -11,7 +11,7 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
     reserved: pot?.reservedAmount ?? 0,
     settled: pot?.settledAmount ?? 0,
     potStatus: pot?.status ?? null,
-    ledgerEntries: entries.map(e => `${e.type}:${e.amount}`),
+    ledgerEntries: entries.map((e) => `${e.type}:${e.amount}`),
   };
 
   if (!card) {
@@ -28,7 +28,7 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
   const totalCaptured = txList.data.reduce((sum, t) => sum + t.amount, 0);
   const stripeReport = {
     cardStatus: stripeCard.status,
-    transactions: txList.data.map(t => ({ id: t.id, amount: t.amount, type: t.type })),
+    transactions: txList.data.map((t) => ({ id: t.id, amount: t.amount, type: t.type })),
     totalCaptured,
   };
 
@@ -36,10 +36,19 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
   if (pot !== null && pot.settledAmount !== totalCaptured) {
     discrepancies.push(`settledAmount ${pot.settledAmount} != stripe captured ${totalCaptured}`);
   }
-  const expectedCardStatus = (pot?.status === 'SETTLED' || pot?.status === 'RETURNED') ? 'canceled' : 'active';
+  const expectedCardStatus =
+    pot?.status === 'SETTLED' || pot?.status === 'RETURNED' ? 'canceled' : 'active';
   if (stripeCard.status !== expectedCardStatus) {
-    discrepancies.push(`pot status ${pot?.status} expects card ${expectedCardStatus} but got ${stripeCard.status}`);
+    discrepancies.push(
+      `pot status ${pot?.status} expects card ${expectedCardStatus} but got ${stripeCard.status}`,
+    );
   }
 
-  return { intentId, internal, stripe: stripeReport, inSync: discrepancies.length === 0, discrepancies };
+  return {
+    intentId,
+    internal,
+    stripe: stripeReport,
+    inSync: discrepancies.length === 0,
+    discrepancies,
+  };
 }

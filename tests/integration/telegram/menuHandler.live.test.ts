@@ -56,9 +56,7 @@ const testSuite = canRun ? describe : describe.skip;
 // ── Low-level Telegram API helpers ────────────────────────────────────────────
 
 async function tgGet(method: string, params: Record<string, unknown> = {}) {
-  const qs = new URLSearchParams(
-    Object.entries(params).map(([k, v]) => [k, String(v)]),
-  ).toString();
+  const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
   const url = qs ? `${BASE}/${method}?${qs}` : `${BASE}/${method}`;
   const res = await fetch(url);
   return res.json() as Promise<any>;
@@ -78,24 +76,22 @@ async function tgPost(method: string, payload: Record<string, unknown>) {
 const MAIN_MENU_KEYBOARD = {
   inline_keyboard: [
     [
-      { text: '💰 Balance',      callback_data: 'menu_balance:_' },
-      { text: '📋 History',      callback_data: 'menu_history:_' },
+      { text: '💰 Balance', callback_data: 'menu_balance:_' },
+      { text: '📋 History', callback_data: 'menu_history:_' },
     ],
     [
       { text: '🚫 Cancel Intent', callback_data: 'menu_cancel_list:_' },
-      { text: '🔗 Agent Status',  callback_data: 'menu_agent:_' },
+      { text: '🔗 Agent Status', callback_data: 'menu_agent:_' },
     ],
-    [
-      { text: '⚙️ Preferences',  callback_data: 'menu_preferences:_' },
-    ],
+    [{ text: '⚙️ Preferences', callback_data: 'menu_preferences:_' }],
   ],
 };
 
 // ── App + poll state ──────────────────────────────────────────────────────────
 
 let app: FastifyInstance;
-let menuMessageId: number;   // message_id of the live menu message in the chat
-let updateOffset = 0;        // rolling getUpdates offset to avoid re-processing
+let menuMessageId: number; // message_id of the live menu message in the chat
+let updateOffset = 0; // rolling getUpdates offset to avoid re-processing
 
 function pause(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -147,9 +143,7 @@ async function waitForCallback(
       const action = cb.data.slice(0, colonIdx);
       const payload = cb.data.slice(colonIdx + 1);
 
-      const matches = allowed.some((a) =>
-        a.includes(':') ? cb.data === a : action === a,
-      );
+      const matches = allowed.some((a) => (a.includes(':') ? cb.data === a : action === a));
 
       if (matches) {
         return {
@@ -174,9 +168,12 @@ async function waitForCallback(
 
 // ── Forward a received tap to the local Fastify app ───────────────────────────
 
-async function forwardCallback(
-  cb: { action: string; payload: string; messageId: number; callbackId: string },
-) {
+async function forwardCallback(cb: {
+  action: string;
+  payload: string;
+  messageId: number;
+  callbackId: string;
+}) {
   const res = await app.inject({
     method: 'POST',
     url: '/v1/webhooks/telegram',
@@ -208,7 +205,7 @@ async function instruct(text: string) {
 // ── DB setup ──────────────────────────────────────────────────────────────────
 
 let userId: string;
-let cancelIntentId: string;
+let _cancelIntentId: string;
 
 async function buildFixtures() {
   const rawKey = crypto.randomBytes(32).toString('hex');
@@ -218,7 +215,7 @@ async function buildFixtures() {
       email: `live-menu-${Date.now()}@example.com`,
       telegramChatId: String(TEST_CHAT_ID),
       agentId: 'live-agent-001',
-      mainBalance: 35000,    // £350.00 total
+      mainBalance: 35000, // £350.00 total
       maxBudgetPerIntent: 50000,
       apiKeyHash,
       apiKeyPrefix: rawKey.slice(0, 16),
@@ -240,7 +237,13 @@ async function buildFixtures() {
     },
   });
   await prisma.pot.create({
-    data: { userId, intentId: doneIntent.id, reservedAmount: 4500, settledAmount: 4000, status: 'SETTLED' },
+    data: {
+      userId,
+      intentId: doneIntent.id,
+      reservedAmount: 4500,
+      settledAmount: 4000,
+      status: 'SETTLED',
+    },
   });
 
   // Cancel list: one active intent with a pot (balance already decremented)
@@ -256,7 +259,7 @@ async function buildFixtures() {
       idempotencyKey: `live-active-${Date.now()}`,
     },
   });
-  cancelIntentId = activeIntent.id;
+  _cancelIntentId = activeIntent.id;
 
   // Balance: reserve £50 from the £350
   await prisma.user.update({ where: { id: userId }, data: { mainBalance: 30000 } });
@@ -384,7 +387,7 @@ testSuite('Telegram /menu — interactive live walkthrough', () => {
 
     const cb = await waitForCallback(['menu_cancel_confirm']);
     console.log(`\nReceived tap: ${cb.action}:${cb.payload}`);
-    cancelIntentId = cb.payload; // capture the real intentId
+    _cancelIntentId = cb.payload; // capture the real intentId
 
     await forwardCallback(cb);
     console.log('✓ Confirm screen shown — expect [✅ Yes, cancel] and [⬅️ Back to list]');
@@ -439,7 +442,9 @@ testSuite('Telegram /menu — interactive live walkthrough', () => {
     console.log(`\nReceived tap: ${cb.action}`);
 
     await forwardCallback(cb);
-    console.log('✓ Preferences shown — expect: policy picker with On Transaction / Immediate / After TTL / Manual buttons');
+    console.log(
+      '✓ Preferences shown — expect: policy picker with On Transaction / Immediate / After TTL / Manual buttons',
+    );
   });
 
   // ── Step 10: Return to main ──────────────────────────────────────────────────

@@ -42,7 +42,9 @@ async function main() {
   });
 
   if (existing) {
-    log.warn('WARNING: API key rotated — the previous key is now invalid. Save the new key printed above.');
+    log.warn(
+      'WARNING: API key rotated — the previous key is now invalid. Save the new key printed above.',
+    );
   }
 
   const chatIdNote = user.telegramChatId

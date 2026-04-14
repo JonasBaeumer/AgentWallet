@@ -31,7 +31,11 @@ describe('approvalDecisionSchema', () => {
   });
 
   it('accepts DENIED with reason', () => {
-    const result = approvalDecisionSchema.safeParse({ decision: 'DENIED', actorId: 'user-1', reason: 'Too expensive' });
+    const result = approvalDecisionSchema.safeParse({
+      decision: 'DENIED',
+      actorId: 'user-1',
+      reason: 'Too expensive',
+    });
     expect(result.success).toBe(true);
   });
 
@@ -43,24 +47,42 @@ describe('approvalDecisionSchema', () => {
 
 describe('agentQuoteSchema', () => {
   it('accepts valid quote', () => {
-    const result = agentQuoteSchema.safeParse({ intentId: 'i-1', merchantName: 'Amazon UK', merchantUrl: 'https://amazon.co.uk', price: 9999 });
+    const result = agentQuoteSchema.safeParse({
+      intentId: 'i-1',
+      merchantName: 'Amazon UK',
+      merchantUrl: 'https://amazon.co.uk',
+      price: 9999,
+    });
     expect(result.success).toBe(true);
   });
 
   it('rejects invalid URL', () => {
-    const result = agentQuoteSchema.safeParse({ intentId: 'i-1', merchantName: 'Amazon', merchantUrl: 'not-a-url', price: 9999 });
+    const result = agentQuoteSchema.safeParse({
+      intentId: 'i-1',
+      merchantName: 'Amazon',
+      merchantUrl: 'not-a-url',
+      price: 9999,
+    });
     expect(result.success).toBe(false);
   });
 });
 
 describe('agentResultSchema', () => {
   it('accepts success result', () => {
-    const result = agentResultSchema.safeParse({ intentId: 'i-1', success: true, actualAmount: 9999 });
+    const result = agentResultSchema.safeParse({
+      intentId: 'i-1',
+      success: true,
+      actualAmount: 9999,
+    });
     expect(result.success).toBe(true);
   });
 
   it('accepts failure result', () => {
-    const result = agentResultSchema.safeParse({ intentId: 'i-1', success: false, errorMessage: 'checkout failed' });
+    const result = agentResultSchema.safeParse({
+      intentId: 'i-1',
+      success: false,
+      errorMessage: 'checkout failed',
+    });
     expect(result.success).toBe(true);
   });
 });

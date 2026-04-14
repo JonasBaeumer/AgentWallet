@@ -173,7 +173,13 @@ async function doCancelIntent(
   try {
     await expireIntent(intentId);
     const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_main:_');
-    await editMenu(bot, chatId, messageId, '✅ Intent cancelled. Your budget has been returned.', keyboard);
+    await editMenu(
+      bot,
+      chatId,
+      messageId,
+      '✅ Intent cancelled. Your budget has been returned.',
+      keyboard,
+    );
   } catch {
     const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_main:_');
     await editMenu(bot, chatId, messageId, '⚠️ Something went wrong. Please try again.', keyboard);
@@ -204,9 +210,10 @@ async function showPreferences(
   user: { cancelPolicy: CardCancelPolicy; cardTtlMinutes: number | null },
 ): Promise<void> {
   const currentLabel = POLICY_LABELS[user.cancelPolicy];
-  const ttlSuffix = user.cancelPolicy === CardCancelPolicy.AFTER_TTL && user.cardTtlMinutes
-    ? ` (${user.cardTtlMinutes} min)`
-    : '';
+  const ttlSuffix =
+    user.cancelPolicy === CardCancelPolicy.AFTER_TTL && user.cardTtlMinutes
+      ? ` (${user.cardTtlMinutes} min)`
+      : '';
 
   const text =
     `⚙️ <b>Preferences</b>\n\nCancel policy: <b>${currentLabel}${ttlSuffix}</b>\n\n` +
@@ -253,7 +260,13 @@ async function savePrefPolicy(
 ): Promise<void> {
   await prisma.user.update({ where: { id: userId }, data: { cancelPolicy: policy } });
   const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
-  await editMenu(bot, chatId, messageId, `✅ Saved! Cancel policy: <b>${POLICY_LABELS[policy]}</b>`, keyboard);
+  await editMenu(
+    bot,
+    chatId,
+    messageId,
+    `✅ Saved! Cancel policy: <b>${POLICY_LABELS[policy]}</b>`,
+    keyboard,
+  );
 }
 
 async function savePrefTtl(
@@ -268,7 +281,13 @@ async function savePrefTtl(
     data: { cancelPolicy: CardCancelPolicy.AFTER_TTL, cardTtlMinutes: minutes },
   });
   const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
-  await editMenu(bot, chatId, messageId, `✅ Saved! Cancel policy: <b>After TTL (${minutes} min)</b>`, keyboard);
+  await editMenu(
+    bot,
+    chatId,
+    messageId,
+    `✅ Saved! Cancel policy: <b>After TTL (${minutes} min)</b>`,
+    keyboard,
+  );
 }
 
 async function startCustomTtlInput(
@@ -277,7 +296,12 @@ async function startCustomTtlInput(
   messageId: number,
 ): Promise<void> {
   // Remove the keyboard from the TTL picker message so it's not left hanging
-  await editMenu(bot, chatId, messageId, '⏱ <b>Custom TTL</b>\n\nType the number of minutes below:');
+  await editMenu(
+    bot,
+    chatId,
+    messageId,
+    '⏱ <b>Custom TTL</b>\n\nType the number of minutes below:',
+  );
   // Send a ForceReply message — Telegram pops up the reply bar anchored to this message
   const prompt = await bot.api.sendMessage(
     chatId,
@@ -302,7 +326,13 @@ async function doCancelCard(
     await editMenu(bot, chatId, messageId, '✅ Card cancelled successfully.', keyboard);
   } catch {
     const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
-    await editMenu(bot, chatId, messageId, '⚠️ Something went wrong cancelling the card. Please try again.', keyboard);
+    await editMenu(
+      bot,
+      chatId,
+      messageId,
+      '⚠️ Something went wrong cancelling the card. Please try again.',
+      keyboard,
+    );
   }
 }
 
@@ -334,7 +364,7 @@ export async function handleMenuCallback(
   messageId: number,
   action: string,
   payload: string,
-  fromTelegramId: number,
+  _fromTelegramId: number,
 ): Promise<void> {
   // Actions that don't need a user record
   if (action === 'menu_main') {

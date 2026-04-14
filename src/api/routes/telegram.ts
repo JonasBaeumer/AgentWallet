@@ -7,36 +7,40 @@ import { linkTelegramSchema } from '@/api/validators/telegram';
 
 export async function telegramRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /v1/webhooks/telegram — receives Telegram updates (callback queries)
-  fastify.post('/v1/webhooks/telegram', {
-    config: {
-      rateLimit: {
-        max: 200,
-        timeWindow: '1 minute',
-        keyGenerator: (req: FastifyRequest) => req.ip ?? 'unknown',
+  fastify.post(
+    '/v1/webhooks/telegram',
+    {
+      config: {
+        rateLimit: {
+          max: 200,
+          timeWindow: '1 minute',
+          keyGenerator: (req: FastifyRequest) => req.ip ?? 'unknown',
+        },
       },
     },
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const secretToken = request.headers['x-telegram-bot-api-secret-token'];
-    if (!env.TELEGRAM_WEBHOOK_SECRET || secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
-      return reply.status(401).send({ error: 'Unauthorized' });
-    }
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const secretToken = request.headers['x-telegram-bot-api-secret-token'];
+      if (!env.TELEGRAM_WEBHOOK_SECRET || secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return reply.status(401).send({ error: 'Unauthorized' });
+      }
 
-    const update = request.body as any;
+      const update = request.body as any;
 
-    if (update?.callback_query) {
-      handleTelegramCallback(update).catch((err: unknown) => {
-        fastify.log.error({ message: 'Telegram callback handler error', error: String(err) });
-      });
-    }
+      if (update?.callback_query) {
+        handleTelegramCallback(update).catch((err: unknown) => {
+          fastify.log.error({ message: 'Telegram callback handler error', error: String(err) });
+        });
+      }
 
-    if (update?.message) {
-      handleTelegramMessage(update).catch((err: unknown) => {
-        fastify.log.error({ message: 'Telegram message handler error', error: String(err) });
-      });
-    }
+      if (update?.message) {
+        handleTelegramMessage(update).catch((err: unknown) => {
+          fastify.log.error({ message: 'Telegram message handler error', error: String(err) });
+        });
+      }
 
-    return reply.send({ received: true });
-  });
+      return reply.send({ received: true });
+    },
+  );
 
   // POST /v1/users/:userId/link-telegram — persist telegramChatId on user
   fastify.post(

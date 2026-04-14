@@ -68,7 +68,9 @@ jest.mock('@/db/client', () => ({
     },
     auditEvent: { create: jest.fn() },
     pairingCode: {
-      findUnique: jest.fn(({ where }: any) => Promise.resolve(dbPairingCodes[where.agentId] ?? null)),
+      findUnique: jest.fn(({ where }: any) =>
+        Promise.resolve(dbPairingCodes[where.agentId] ?? null),
+      ),
       create: jest.fn(({ data }: any) => {
         const record = { id: `pc-${Date.now()}`, ...data, createdAt: new Date() };
         dbPairingCodes[record.agentId] = record;

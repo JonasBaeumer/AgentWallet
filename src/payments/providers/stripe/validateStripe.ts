@@ -22,9 +22,13 @@ export async function validateStripeSetup(): Promise<void> {
       log.warn('STRIPE_SECRET_KEY is invalid — Stripe authentication failed');
       return;
     }
-    if (err instanceof Stripe.errors.StripePermissionError ||
-        (err instanceof Stripe.errors.StripeError && err.code === 'resource_missing')) {
-      log.warn('Stripe Issuing is not enabled on this account. Apply at https://stripe.com/issuing');
+    if (
+      err instanceof Stripe.errors.StripePermissionError ||
+      (err instanceof Stripe.errors.StripeError && err.code === 'resource_missing')
+    ) {
+      log.warn(
+        'Stripe Issuing is not enabled on this account. Apply at https://stripe.com/issuing',
+      );
       return;
     }
     log.warn(`Stripe validation failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -37,7 +41,7 @@ export async function validateStripeSetup(): Promise<void> {
   try {
     const balance = await stripe.balance.retrieve();
     const issuingBalance = balance.issuing?.available ?? [];
-    const summary = issuingBalance.map(b => `${b.amount} ${b.currency}`).join(', ') || 'no funds';
+    const summary = issuingBalance.map((b) => `${b.amount} ${b.currency}`).join(', ') || 'no funds';
     log.info(`Stripe Issuing balance: ${summary}`);
   } catch {
     // Balance retrieval is informational — don't fail

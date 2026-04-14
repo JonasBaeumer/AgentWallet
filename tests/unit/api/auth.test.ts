@@ -21,7 +21,9 @@ describe('workerAuthMiddleware', () => {
     const mockRequest = { headers: {} } as any;
     await workerAuthMiddleware(mockRequest, mockReply as any);
     expect(mockReply.status).toHaveBeenCalledWith(401);
-    expect(mockReply.send).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringContaining('Unauthorized') }));
+    expect(mockReply.send).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining('Unauthorized') }),
+    );
   });
 
   it('returns 401 when X-Worker-Key is wrong', async () => {

@@ -40,11 +40,19 @@ jest.mock('@/ledger/potService', () => ({
 }));
 
 const mockIssueCard = jest.fn().mockResolvedValue({ stripeCardId: 'ic_test', last4: '4242' });
-const mockRevealCard = jest.fn().mockResolvedValue({ number: '4242424242424242', cvc: '123', expMonth: 12, expYear: 2030, last4: '4242' });
+const mockRevealCard = jest.fn().mockResolvedValue({
+  number: '4242424242424242',
+  cvc: '123',
+  expMonth: 12,
+  expYear: 2030,
+  last4: '4242',
+});
 const mockFreezeCard = jest.fn().mockResolvedValue(undefined);
 const mockCancelCard = jest.fn().mockResolvedValue(undefined);
 const mockHandleWebhookEvent = jest.fn().mockResolvedValue(undefined);
-const mockGetIssuingBalance = jest.fn().mockResolvedValue({ available: 999_999_99, currency: 'gbp' });
+const mockGetIssuingBalance = jest
+  .fn()
+  .mockResolvedValue({ available: 999_999_99, currency: 'gbp' });
 const mockProvider = {
   issueCard: mockIssueCard,
   revealCard: mockRevealCard,
@@ -140,17 +148,26 @@ function seedAwaitingIntent(id: string) {
 
 describe('handleTelegramCallback — link_confirm', () => {
   it('advances session to awaiting_email and edits message on confirm', async () => {
-    const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
+    const session = {
+      step: 'awaiting_confirmation' as const,
+      agentId: 'ag_test',
+      pairingCode: 'ABCD1234',
+    };
     mockGetSession.mockResolvedValue(session);
 
     await handleTelegramCallback(makeUpdate('link_confirm', '_', 'cb-lc1', 12345678));
 
     expect(mockSetSession).toHaveBeenCalledWith(
       12345678,
-      expect.objectContaining({ step: 'awaiting_email', agentId: 'ag_test', pairingCode: 'ABCD1234' }),
+      expect.objectContaining({
+        step: 'awaiting_email',
+        agentId: 'ag_test',
+        pairingCode: 'ABCD1234',
+      }),
     );
     expect(mockEditMessageText).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(),
+      expect.anything(),
+      expect.anything(),
       expect.stringContaining('email'),
       expect.any(Object),
     );
@@ -163,14 +180,19 @@ describe('handleTelegramCallback — link_confirm', () => {
 
     expect(mockSetSession).not.toHaveBeenCalled();
     expect(mockEditMessageText).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(),
+      expect.anything(),
+      expect.anything(),
       expect.stringContaining('Session expired'),
       expect.any(Object),
     );
   });
 
   it('does not touch purchase approval flow on link_confirm', async () => {
-    const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
+    const session = {
+      step: 'awaiting_confirmation' as const,
+      agentId: 'ag_test',
+      pairingCode: 'ABCD1234',
+    };
     mockGetSession.mockResolvedValue(session);
 
     await handleTelegramCallback(makeUpdate('link_confirm', '_', 'cb-lc3', 12345678));
@@ -182,14 +204,19 @@ describe('handleTelegramCallback — link_confirm', () => {
 
 describe('handleTelegramCallback — link_cancel', () => {
   it('clears session and edits message on cancel', async () => {
-    const session = { step: 'awaiting_confirmation' as const, agentId: 'ag_test', pairingCode: 'ABCD1234' };
+    const session = {
+      step: 'awaiting_confirmation' as const,
+      agentId: 'ag_test',
+      pairingCode: 'ABCD1234',
+    };
     mockGetSession.mockResolvedValue(session);
 
     await handleTelegramCallback(makeUpdate('link_cancel', '_', 'cb-lcancel1', 12345678));
 
     expect(mockClearSession).toHaveBeenCalledWith(12345678);
     expect(mockEditMessageText).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(),
+      expect.anything(),
+      expect.anything(),
       expect.stringContaining('cancelled'),
       expect.any(Object),
     );
@@ -202,7 +229,8 @@ describe('handleTelegramCallback — link_cancel', () => {
 
     expect(mockClearSession).not.toHaveBeenCalled();
     expect(mockEditMessageText).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(),
+      expect.anything(),
+      expect.anything(),
       expect.stringContaining('Session expired'),
       expect.any(Object),
     );
@@ -215,9 +243,18 @@ describe('handleTelegramCallback — approve path', () => {
   it('calls answerCallbackQuery first (before any service work)', async () => {
     seedAwaitingIntent('intent-cb1');
     const callOrder: string[] = [];
-    mockAnswerCallbackQuery.mockImplementation(() => { callOrder.push('answer'); return Promise.resolve(); });
-    mockGetIssuingBalance.mockImplementation(() => { callOrder.push('balance'); return Promise.resolve({ available: 999_999_99, currency: 'gbp' }); });
-    mockRecordDecision.mockImplementation(() => { callOrder.push('record'); return Promise.resolve({}); });
+    mockAnswerCallbackQuery.mockImplementation(() => {
+      callOrder.push('answer');
+      return Promise.resolve();
+    });
+    mockGetIssuingBalance.mockImplementation(() => {
+      callOrder.push('balance');
+      return Promise.resolve({ available: 999_999_99, currency: 'gbp' });
+    });
+    mockRecordDecision.mockImplementation(() => {
+      callOrder.push('record');
+      return Promise.resolve({});
+    });
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-cb1', 'cb-cb1'));
 
@@ -229,13 +266,34 @@ describe('handleTelegramCallback — approve path', () => {
   it('calls all 7 service functions in correct order (balance before recordDecision)', async () => {
     seedAwaitingIntent('intent-cb2');
     const order: string[] = [];
-    mockGetIssuingBalance.mockImplementation(() => { order.push('getIssuingBalance'); return Promise.resolve({ available: 999_999_99, currency: 'gbp' }); });
-    mockRecordDecision.mockImplementation(() => { order.push('recordDecision'); return Promise.resolve({}); });
-    mockReserveForIntent.mockImplementation(() => { order.push('reserveForIntent'); return Promise.resolve({}); });
-    mockIssueCard.mockImplementation(() => { order.push('issueCard'); return Promise.resolve({ stripeCardId: 'ic_t', last4: '4242' }); });
-    mockMarkCardIssued.mockImplementation(() => { order.push('markCardIssued'); return Promise.resolve({}); });
-    mockStartCheckout.mockImplementation(() => { order.push('startCheckout'); return Promise.resolve({}); });
-    mockEnqueueCheckout.mockImplementation(() => { order.push('enqueueCheckout'); return Promise.resolve(); });
+    mockGetIssuingBalance.mockImplementation(() => {
+      order.push('getIssuingBalance');
+      return Promise.resolve({ available: 999_999_99, currency: 'gbp' });
+    });
+    mockRecordDecision.mockImplementation(() => {
+      order.push('recordDecision');
+      return Promise.resolve({});
+    });
+    mockReserveForIntent.mockImplementation(() => {
+      order.push('reserveForIntent');
+      return Promise.resolve({});
+    });
+    mockIssueCard.mockImplementation(() => {
+      order.push('issueCard');
+      return Promise.resolve({ stripeCardId: 'ic_t', last4: '4242' });
+    });
+    mockMarkCardIssued.mockImplementation(() => {
+      order.push('markCardIssued');
+      return Promise.resolve({});
+    });
+    mockStartCheckout.mockImplementation(() => {
+      order.push('startCheckout');
+      return Promise.resolve({});
+    });
+    mockEnqueueCheckout.mockImplementation(() => {
+      order.push('enqueueCheckout');
+      return Promise.resolve();
+    });
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-cb2', 'cb-cb2'));
 
@@ -255,7 +313,12 @@ describe('handleTelegramCallback — approve path', () => {
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-cb3', 'cb-cb3'));
 
-    expect(mockEditMessageText).toHaveBeenCalledWith(999, 10, '✅ Approved. Checkout is running.', expect.any(Object));
+    expect(mockEditMessageText).toHaveBeenCalledWith(
+      999,
+      10,
+      '✅ Approved. Checkout is running.',
+      expect.any(Object),
+    );
   });
 });
 
@@ -265,7 +328,12 @@ describe('handleTelegramCallback — reject path', () => {
 
     await handleTelegramCallback(makeUpdate('reject', 'intent-rej1', 'cb-rej1'));
 
-    expect(mockRecordDecision).toHaveBeenCalledWith('intent-rej1', ApprovalDecisionType.DENIED, expect.any(String), 'Rejected via Telegram');
+    expect(mockRecordDecision).toHaveBeenCalledWith(
+      'intent-rej1',
+      ApprovalDecisionType.DENIED,
+      expect.any(String),
+      'Rejected via Telegram',
+    );
     expect(mockReserveForIntent).not.toHaveBeenCalled();
     expect(mockIssueCard).not.toHaveBeenCalled();
     expect(mockEnqueueCheckout).not.toHaveBeenCalled();
@@ -282,7 +350,14 @@ describe('handleTelegramCallback — reject path', () => {
 
 describe('handleTelegramCallback — guard: not AWAITING_APPROVAL', () => {
   it('does not call any service function when status is not AWAITING_APPROVAL', async () => {
-    dbIntents['intent-done'] = { ...dbIntents['intent-done'], id: 'intent-done', status: IntentStatus.DONE, userId: 'u', metadata: {}, user: {} };
+    dbIntents['intent-done'] = {
+      ...dbIntents['intent-done'],
+      id: 'intent-done',
+      status: IntentStatus.DONE,
+      userId: 'u',
+      metadata: {},
+      user: {},
+    };
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-done', 'cb-done'));
 
@@ -291,12 +366,19 @@ describe('handleTelegramCallback — guard: not AWAITING_APPROVAL', () => {
   });
 
   it('edits message with current status when already processed', async () => {
-    dbIntents['intent-alr'] = { id: 'intent-alr', status: IntentStatus.CHECKOUT_RUNNING, userId: 'u', metadata: {}, user: {} };
+    dbIntents['intent-alr'] = {
+      id: 'intent-alr',
+      status: IntentStatus.CHECKOUT_RUNNING,
+      userId: 'u',
+      metadata: {},
+      user: {},
+    };
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-alr', 'cb-alr'));
 
     expect(mockEditMessageText).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(),
+      expect.anything(),
+      expect.anything(),
       expect.stringContaining('CHECKOUT_RUNNING'),
       expect.any(Object),
     );
@@ -334,7 +416,8 @@ describe('handleTelegramCallback — insufficient Issuing balance', () => {
     await handleTelegramCallback(makeUpdate('approve', 'intent-bal2', 'cb-bal2'));
 
     expect(mockEditMessageText).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(),
+      expect.anything(),
+      expect.anything(),
       expect.stringContaining('Insufficient Stripe Issuing balance'),
       expect.any(Object),
     );
@@ -344,7 +427,9 @@ describe('handleTelegramCallback — insufficient Issuing balance', () => {
     seedAwaitingIntent('intent-bal3');
     mockGetIssuingBalance.mockResolvedValueOnce({ available: 0, currency: 'gbp' });
 
-    await expect(handleTelegramCallback(makeUpdate('approve', 'intent-bal3', 'cb-bal3'))).resolves.toBeUndefined();
+    await expect(
+      handleTelegramCallback(makeUpdate('approve', 'intent-bal3', 'cb-bal3')),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -353,7 +438,9 @@ describe('handleTelegramCallback — issueVirtualCard failure compensation', () 
     seedAwaitingIntent('intent-fail');
     mockIssueCard.mockRejectedValueOnce(new Error('Stripe down'));
 
-    await expect(handleTelegramCallback(makeUpdate('approve', 'intent-fail', 'cb-fail'))).rejects.toThrow('Stripe down');
+    await expect(
+      handleTelegramCallback(makeUpdate('approve', 'intent-fail', 'cb-fail')),
+    ).rejects.toThrow('Stripe down');
 
     expect(mockReturnIntent).toHaveBeenCalledWith('intent-fail');
   });
@@ -362,10 +449,13 @@ describe('handleTelegramCallback — issueVirtualCard failure compensation', () 
     seedAwaitingIntent('intent-fail2');
     mockIssueCard.mockRejectedValueOnce(new Error('Stripe down'));
 
-    await expect(handleTelegramCallback(makeUpdate('approve', 'intent-fail2', 'cb-fail2'))).rejects.toThrow();
+    await expect(
+      handleTelegramCallback(makeUpdate('approve', 'intent-fail2', 'cb-fail2')),
+    ).rejects.toThrow();
 
     expect(mockEditMessageText).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(),
+      expect.anything(),
+      expect.anything(),
       expect.stringContaining('⚠️'),
       expect.any(Object),
     );
@@ -375,7 +465,9 @@ describe('handleTelegramCallback — issueVirtualCard failure compensation', () 
     seedAwaitingIntent('intent-idem2');
     mockIssueCard.mockRejectedValueOnce(new Error('Stripe down'));
 
-    await expect(handleTelegramCallback(makeUpdate('approve', 'intent-idem2', 'cb-idem2'))).rejects.toThrow();
+    await expect(
+      handleTelegramCallback(makeUpdate('approve', 'intent-idem2', 'cb-idem2')),
+    ).rejects.toThrow();
 
     // Re-run with same callbackQueryId — idempotency guard should block it
     mockIssueCard.mockResolvedValue({ stripeCardId: 'ic_t', last4: '4242' });

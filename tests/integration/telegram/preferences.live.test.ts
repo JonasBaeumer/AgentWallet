@@ -54,9 +54,7 @@ const testSuite = canRun ? describe : describe.skip;
 // ── Low-level Telegram API helpers ────────────────────────────────────────────
 
 async function tgGet(method: string, params: Record<string, unknown> = {}) {
-  const qs = new URLSearchParams(
-    Object.entries(params).map(([k, v]) => [k, String(v)]),
-  ).toString();
+  const qs = new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString();
   const url = qs ? `${BASE}/${method}?${qs}` : `${BASE}/${method}`;
   const res = await fetch(url);
   return res.json() as Promise<any>;
@@ -142,9 +140,7 @@ async function waitForCallback(
       const action = cb.data.slice(0, colonIdx);
       const payload = cb.data.slice(colonIdx + 1);
 
-      const matches = allowed.some((a) =>
-        a.includes(':') ? cb.data === a : action === a,
-      );
+      const matches = allowed.some((a) => (a.includes(':') ? cb.data === a : action === a));
 
       if (matches) {
         return {
@@ -214,9 +210,12 @@ async function waitForTextMessage(
 
 // ── Forward a button tap to the local Fastify app ─────────────────────────────
 
-async function forwardCallback(
-  cb: { action: string; payload: string; messageId: number; callbackId: string },
-) {
+async function forwardCallback(cb: {
+  action: string;
+  payload: string;
+  messageId: number;
+  callbackId: string;
+}) {
   const res = await app.inject({
     method: 'POST',
     url: '/v1/webhooks/telegram',
@@ -274,9 +273,7 @@ async function deleteMsg(messageId: number) {
 // ── Keyboard used to open the Preferences screen ─────────────────────────────
 
 const PREFS_ENTRY_KEYBOARD = {
-  inline_keyboard: [
-    [{ text: '⚙️ Preferences', callback_data: 'menu_preferences:_' }],
-  ],
+  inline_keyboard: [[{ text: '⚙️ Preferences', callback_data: 'menu_preferences:_' }]],
 };
 
 // ── DB setup ──────────────────────────────────────────────────────────────────
@@ -477,7 +474,9 @@ testSuite('Telegram Preferences screen — interactive live walkthrough', () => 
   });
 
   it('Step 10 — user replies with "90" — saves AFTER_TTL (90 min)', async () => {
-    const msg = await instruct('👆 <b>Reply to the bot\'s message</b> with the number of minutes (e.g. 90).');
+    const msg = await instruct(
+      "👆 <b>Reply to the bot's message</b> with the number of minutes (e.g. 90).",
+    );
 
     const { text, messageId } = await waitForTextMessage();
     await deleteMsg(msg);

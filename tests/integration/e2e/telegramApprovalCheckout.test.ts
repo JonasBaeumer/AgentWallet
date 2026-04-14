@@ -27,24 +27,20 @@
  */
 
 import { prisma } from '@/db/client';
-import { getRedisClient, disconnectRedis } from '@/config/redis';
+import { disconnectRedis } from '@/config/redis';
 import { requestApproval, recordDecision } from '@/approval/approvalService';
 import { sendApprovalRequest } from '@/telegram/notificationService';
-import { issueVirtualCard } from '@/payments/providers/stripe/cardService';
+import { createStripeProvider } from '@/payments/testHelpers';
 import { reserveForIntent, settleIntent } from '@/ledger/potService';
-import {
-  markCardIssued,
-  startCheckout,
-  completeCheckout,
-} from '@/orchestrator/intentService';
-import { getStripeClient } from '@/payments/providers/stripe/stripeClient';
+import { markCardIssued, startCheckout, completeCheckout } from '@/orchestrator/intentService';
 import { IntentStatus, ApprovalDecisionType } from '@/contracts';
 import { getTelegramMockCalls, clearTelegramMockCalls } from '@/telegram/mockBot';
 
+const stripeCtx = createStripeProvider();
+
 // -- Skip conditions ----------------------------------------------------------
 const hasStripeKey = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_');
-const isMockMode =
-  process.env.TELEGRAM_MOCK === 'true' || !process.env.TELEGRAM_BOT_TOKEN;
+const isMockMode = process.env.TELEGRAM_MOCK === 'true' || !process.env.TELEGRAM_BOT_TOKEN;
 const hasTelegram =
   isMockMode ||
   (!!process.env.TELEGRAM_BOT_TOKEN &&
@@ -173,7 +169,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
         // Mock mode: skip the 60 s wait and auto-approve immediately
         await recordDecision(intentId, ApprovalDecisionType.APPROVED, 'test-mock-approve');
         await reserveForIntent(userId, intentId, MAX_BUDGET);
-        await issueVirtualCard(intentId, MAX_BUDGET, CURRENCY);
+        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET, CURRENCY);
         await markCardIssued(intentId);
         await startCheckout(intentId);
 
@@ -213,7 +209,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
         console.log('Timeout -- auto-approving and continuing...');
         await recordDecision(intentId, ApprovalDecisionType.APPROVED, 'test-auto-approve');
         await reserveForIntent(userId, intentId, MAX_BUDGET);
-        await issueVirtualCard(intentId, MAX_BUDGET, CURRENCY);
+        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET, CURRENCY);
         await markCardIssued(intentId);
         await startCheckout(intentId);
         currentStatus = IntentStatus.CHECKOUT_RUNNING;
@@ -225,10 +221,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
       }
 
       const intent = await prisma.purchaseIntent.findUniqueOrThrow({ where: { id: intentId } });
-      expect([
-        IntentStatus.CARD_ISSUED,
-        IntentStatus.CHECKOUT_RUNNING,
-      ]).toContain(intent.status);
+      expect([IntentStatus.CARD_ISSUED, IntentStatus.CHECKOUT_RUNNING]).toContain(intent.status);
     },
     isMockMode ? 30_000 : APPROVAL_TIMEOUT_MS + 30_000,
   );
@@ -239,8 +232,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
     expect(card.stripeCardId).toMatch(/^ic_/);
     expect(card.last4).toHaveLength(4);
 
-    const stripe = getStripeClient();
-    const stripeCard = await stripe.issuing.cards.retrieve(card.stripeCardId);
+    const stripeCard = await stripeCtx.stripe.issuing.cards.retrieve(card.stripeCardId);
     expect(stripeCard.status).toBe('active');
     expect(stripeCard.spending_controls.spending_limits[0].amount).toBe(MAX_BUDGET);
 
@@ -250,36 +242,29 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
   });
 
   // -- Step 6 -- Simulated checkout via Stripe test helpers -------------------
-  it(
-    'creates a real Stripe authorization and captures it (simulated checkout)',
-    async () => {
-      // Stripe test mode: freshly created individual cardholders need ~3 s to
-      // settle before authorizations are approved
-      console.log('Waiting 3 s for cardholder verification to settle...');
-      await new Promise((r) => setTimeout(r, 3000));
+  it('creates a real Stripe authorization and captures it (simulated checkout)', async () => {
+    // Stripe test mode: freshly created individual cardholders need ~3 s to
+    // settle before authorizations are approved
+    console.log('Waiting 3 s for cardholder verification to settle...');
+    await new Promise((r) => setTimeout(r, 3000));
 
-      const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
-      const stripe = getStripeClient();
+    const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
 
-      const auth = await stripe.testHelpers.issuing.authorizations.create({
-        card: card.stripeCardId,
-        amount: CHECKOUT_AMOUNT,
-        currency: CURRENCY,
-        merchant_data: { name: MERCHANT_NAME },
-      });
+    const auth = await stripeCtx.stripe.testHelpers.issuing.authorizations.create({
+      card: card.stripeCardId,
+      amount: CHECKOUT_AMOUNT,
+      currency: CURRENCY,
+      merchant_data: { name: MERCHANT_NAME },
+    });
 
-      expect(auth.approved).toBe(true);
-      expect(auth.status).toBe('pending');
-      console.log(
-        `Authorization approved: ${auth.id} (EUR${(CHECKOUT_AMOUNT / 100).toFixed(2)})`,
-      );
+    expect(auth.approved).toBe(true);
+    expect(auth.status).toBe('pending');
+    console.log(`Authorization approved: ${auth.id} (EUR${(CHECKOUT_AMOUNT / 100).toFixed(2)})`);
 
-      const captured = await stripe.testHelpers.issuing.authorizations.capture(auth.id);
-      expect(captured.status).toBe('closed');
-      console.log(`Transaction captured.`);
-    },
-    30_000,
-  );
+    const captured = await stripeCtx.stripe.testHelpers.issuing.authorizations.capture(auth.id);
+    expect(captured.status).toBe('closed');
+    console.log(`Transaction captured.`);
+  }, 30_000);
 
   // -- Step 7 -- Finalize intent + settle ledger ------------------------------
   it('finalizes the intent and settles the ledger', async () => {

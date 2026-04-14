@@ -87,7 +87,9 @@ jest.mock('@/db/client', () => ({
       findUnique: jest.fn(({ where }: any) => {
         if (where.id) return Promise.resolve(dbUsers[where.id] ?? null);
         if (where.apiKeyPrefix) {
-          const found = Object.values(dbUsers).find((u: any) => u.apiKeyPrefix === where.apiKeyPrefix);
+          const found = Object.values(dbUsers).find(
+            (u: any) => u.apiKeyPrefix === where.apiKeyPrefix,
+          );
           return Promise.resolve(found ?? null);
         }
         return Promise.resolve(null);
@@ -98,7 +100,11 @@ jest.mock('@/db/client', () => ({
       findUnique: jest.fn().mockResolvedValue(null),
       update: jest.fn(),
       findMany: jest.fn(({ where }: any) =>
-        Promise.resolve(Object.values(dbIntents).filter((i: any) => i.userId === where.userId && where.status?.in?.includes(i.status)))
+        Promise.resolve(
+          Object.values(dbIntents).filter(
+            (i: any) => i.userId === where.userId && where.status?.in?.includes(i.status),
+          ),
+        ),
       ),
     },
     idempotencyRecord: {
@@ -292,7 +298,11 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
   it('continues unlinking even if expiring an intent fails, and omits failed intent from cancelledIntentIds', async () => {
     seedUser('ag_linked');
     dbIntents['i-ok'] = { id: 'i-ok', userId: 'user-1', status: IntentStatus.SEARCHING };
-    dbIntents['i-fail'] = { id: 'i-fail', userId: 'user-1', status: IntentStatus.AWAITING_APPROVAL };
+    dbIntents['i-fail'] = {
+      id: 'i-fail',
+      userId: 'user-1',
+      status: IntentStatus.AWAITING_APPROVAL,
+    };
     // First call succeeds, second fails
     mockExpireIntent
       .mockResolvedValueOnce({ newStatus: 'EXPIRED' })

@@ -1,13 +1,19 @@
 import { PurchaseIntentData, IntentEvent } from './intent';
 import { CardReveal, VirtualCardData } from './card';
-import { PolicyResult, ApprovalDecisionData, ApprovalDecisionType } from './approval';
-import { LedgerEntryData, PotData } from './ledger';
+import { ApprovalDecisionData, ApprovalDecisionType } from './approval';
+import { PotData } from './ledger';
 import { SearchIntentJob, CheckoutIntentJob } from './jobs';
 import { AuditEventData } from './audit';
 
 export interface IOrchestrator {
-  transitionIntent(intentId: string, event: IntentEvent, payload?: Record<string, unknown>): Promise<PurchaseIntentData>;
-  getIntentWithHistory(intentId: string): Promise<{ intent: PurchaseIntentData; auditEvents: AuditEventData[] }>;
+  transitionIntent(
+    intentId: string,
+    event: IntentEvent,
+    payload?: Record<string, unknown>,
+  ): Promise<PurchaseIntentData>;
+  getIntentWithHistory(
+    intentId: string,
+  ): Promise<{ intent: PurchaseIntentData; auditEvents: AuditEventData[] }>;
 }
 
 export interface IssuingBalance {
@@ -16,7 +22,12 @@ export interface IssuingBalance {
 }
 
 export interface IPaymentProvider {
-  issueCard(intentId: string, amount: number, currency: string, options?: { mccAllowlist?: string[] }): Promise<VirtualCardData>;
+  issueCard(
+    intentId: string,
+    amount: number,
+    currency: string,
+    options?: { mccAllowlist?: string[] },
+  ): Promise<VirtualCardData>;
   revealCard(intentId: string): Promise<CardReveal>;
   freezeCard(intentId: string): Promise<void>;
   cancelCard(intentId: string): Promise<void>;
@@ -26,7 +37,12 @@ export interface IPaymentProvider {
 
 export interface IApprovalService {
   requestApproval(intentId: string): Promise<void>;
-  recordDecision(intentId: string, decision: ApprovalDecisionType, actorId: string, reason?: string): Promise<ApprovalDecisionData>;
+  recordDecision(
+    intentId: string,
+    decision: ApprovalDecisionType,
+    actorId: string,
+    reason?: string,
+  ): Promise<ApprovalDecisionData>;
 }
 
 export interface ILedgerService {

@@ -44,7 +44,8 @@ beforeEach(() => {
 describe('Stripe webhook endpoint', () => {
   it('400 when stripe-signature header is missing', async () => {
     const res = await app.inject({
-      method: 'POST', url: '/v1/webhooks/stripe',
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'issuing_authorization.created' }),
     });
@@ -55,7 +56,8 @@ describe('Stripe webhook endpoint', () => {
   it('200 with received:true when handleWebhookEvent throws', async () => {
     mockHandleWebhookEvent.mockRejectedValueOnce(new Error('bad sig'));
     const res = await app.inject({
-      method: 'POST', url: '/v1/webhooks/stripe',
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
       headers: { 'content-type': 'application/json', 'stripe-signature': 'sig-test' },
       body: JSON.stringify({ type: 'issuing_authorization.created' }),
     });
@@ -66,7 +68,8 @@ describe('Stripe webhook endpoint', () => {
   it('passes response body from handleWebhookEvent to caller', async () => {
     mockHandleWebhookEvent.mockResolvedValueOnce({ approved: true });
     const res = await app.inject({
-      method: 'POST', url: '/v1/webhooks/stripe',
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
       headers: { 'content-type': 'application/json', 'stripe-signature': 'sig-test' },
       body: JSON.stringify({}),
     });
@@ -77,14 +80,12 @@ describe('Stripe webhook endpoint', () => {
   it('passes raw body and signature to handleWebhookEvent', async () => {
     const rawBody = JSON.stringify({ type: 'issuing_authorization.created' });
     await app.inject({
-      method: 'POST', url: '/v1/webhooks/stripe',
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
       headers: { 'content-type': 'application/json', 'stripe-signature': 'sig-abc' },
       body: rawBody,
     });
-    expect(mockHandleWebhookEvent).toHaveBeenCalledWith(
-      expect.any(Buffer),
-      'sig-abc',
-    );
+    expect(mockHandleWebhookEvent).toHaveBeenCalledWith(expect.any(Buffer), 'sig-abc');
   });
 });
 

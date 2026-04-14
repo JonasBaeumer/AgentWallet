@@ -4,7 +4,13 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '@/db/client';
 import { getTelegramBot } from './telegramClient';
-import { getSignupSession, setSignupSession, clearSignupSession, getPrefSession, clearPrefSession } from './sessionStore';
+import {
+  getSignupSession,
+  setSignupSession,
+  clearSignupSession,
+  getPrefSession,
+  clearPrefSession,
+} from './sessionStore';
 import { sendMainMenu } from './menuHandler';
 import { CardCancelPolicy } from '@/contracts';
 
@@ -27,7 +33,10 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
   if (prefSession?.awaitingCustomTtl) {
     const minutes = parseInt(text, 10);
     if (isNaN(minutes) || minutes < 1 || minutes > 10080) {
-      await bot.api.sendMessage(chatId, '⚠️ Please send a whole number of minutes between 1 and 10080, e.g. 90');
+      await bot.api.sendMessage(
+        chatId,
+        '⚠️ Please send a whole number of minutes between 1 and 10080, e.g. 90',
+      );
       return;
     }
     await clearPrefSession(chatId);
@@ -103,7 +112,10 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
   }
 
   if (session.step === 'awaiting_confirmation') {
-    await bot.api.sendMessage(chatId, 'Please use the buttons above to confirm or cancel the linking.');
+    await bot.api.sendMessage(
+      chatId,
+      'Please use the buttons above to confirm or cancel the linking.',
+    );
     return;
   }
 
@@ -123,7 +135,9 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
     const result = await prisma.$transaction(async (tx) => {
       const freshCode = await tx.pairingCode.findUnique({ where: { code: session.pairingCode } });
       if (!freshCode || freshCode.claimedByUserId) {
-        throw Object.assign(new Error('Code already claimed'), { name: 'PairingCodeAlreadyClaimedError' });
+        throw Object.assign(new Error('Code already claimed'), {
+          name: 'PairingCodeAlreadyClaimedError',
+        });
       }
 
       const user = await tx.user.create({

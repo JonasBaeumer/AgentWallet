@@ -44,10 +44,12 @@ let app: FastifyInstance;
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
-async function createTestUser(overrides: Partial<{
-  agentId: string | null;
-  mainBalance: number;
-}> = {}) {
+async function createTestUser(
+  overrides: Partial<{
+    agentId: string | null;
+    mainBalance: number;
+  }> = {},
+) {
   return prisma.user.create({
     data: {
       email: `menu-test-${Date.now()}@example.com`,
@@ -61,7 +63,10 @@ async function createTestUser(overrides: Partial<{
   });
 }
 
-async function createIntent(userId: string, opts: { status?: string; budget?: number; subject?: string } = {}) {
+async function createIntent(
+  userId: string,
+  opts: { status?: string; budget?: number; subject?: string } = {},
+) {
   return prisma.purchaseIntent.create({
     data: {
       userId,
@@ -197,7 +202,7 @@ testSuite('Telegram /menu integration (real DB)', () => {
 
       const [, , text] = mockEditMessageText.mock.calls[0];
       expect(text).toContain('£125.00'); // main balance
-      expect(text).toContain('£25.00');  // reserved
+      expect(text).toContain('£25.00'); // reserved
       expect(text).toContain('£100.00'); // available
     });
 
@@ -216,7 +221,11 @@ testSuite('Telegram /menu integration (real DB)', () => {
   describe('menu_history callback', () => {
     it('lists DONE intents with their settled amounts', async () => {
       const user = await createTestUser();
-      const intent = await createIntent(user.id, { status: 'DONE', subject: 'headphones', budget: 4500 });
+      const intent = await createIntent(user.id, {
+        status: 'DONE',
+        subject: 'headphones',
+        budget: 4500,
+      });
       await createPot(user.id, intent.id, 4500);
       // Mark pot as settled
       await prisma.pot.update({
@@ -246,8 +255,16 @@ testSuite('Telegram /menu integration (real DB)', () => {
   describe('menu_cancel_list callback', () => {
     it('renders one cancel button per active intent', async () => {
       const user = await createTestUser();
-      const i1 = await createIntent(user.id, { status: 'SEARCHING', subject: 'headphones', budget: 5000 });
-      const i2 = await createIntent(user.id, { status: 'AWAITING_APPROVAL', subject: 'coffee maker', budget: 8900 });
+      const i1 = await createIntent(user.id, {
+        status: 'SEARCHING',
+        subject: 'headphones',
+        budget: 5000,
+      });
+      const i2 = await createIntent(user.id, {
+        status: 'AWAITING_APPROVAL',
+        subject: 'coffee maker',
+        budget: 8900,
+      });
 
       await sendMenuCallback('menu_cancel_list', '_');
 
@@ -279,7 +296,11 @@ testSuite('Telegram /menu integration (real DB)', () => {
   describe('menu_cancel_confirm callback', () => {
     it('shows intent label, budget and confirm/back buttons', async () => {
       const user = await createTestUser();
-      const intent = await createIntent(user.id, { status: 'SEARCHING', subject: 'headphones', budget: 5000 });
+      const intent = await createIntent(user.id, {
+        status: 'SEARCHING',
+        subject: 'headphones',
+        budget: 5000,
+      });
 
       await sendMenuCallback('menu_cancel_confirm', intent.id);
 
@@ -288,7 +309,9 @@ testSuite('Telegram /menu integration (real DB)', () => {
       expect(text).toContain('£50.00');
 
       const buttons = opts.reply_markup.inline_keyboard.flat();
-      expect(buttons.some((b: any) => b.callback_data === `menu_cancel_do:${intent.id}`)).toBe(true);
+      expect(buttons.some((b: any) => b.callback_data === `menu_cancel_do:${intent.id}`)).toBe(
+        true,
+      );
       expect(buttons.some((b: any) => b.callback_data === 'menu_cancel_list:_')).toBe(true);
     });
   });

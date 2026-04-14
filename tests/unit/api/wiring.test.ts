@@ -12,7 +12,10 @@
 
 // checkout simulator
 const mockRunSimulatedCheckout = jest.fn().mockResolvedValue({
-  success: true, chargeId: 'pi_wiring_test', amount: 5000, currency: 'eur',
+  success: true,
+  chargeId: 'pi_wiring_test',
+  amount: 5000,
+  currency: 'eur',
 });
 jest.mock('@/payments/providers/stripe/checkoutSimulator', () => ({
   runSimulatedCheckout: mockRunSimulatedCheckout,
@@ -76,13 +79,22 @@ jest.mock('@/ledger/potService', () => ({
 
 // payments — mock the provider factory so callers get our spies
 const mockIssueVirtualCard = jest.fn().mockResolvedValue({
-  id: 'vc-1', intentId: 'intent-1', stripeCardId: 'ic_test', last4: '4242',
+  id: 'vc-1',
+  intentId: 'intent-1',
+  stripeCardId: 'ic_test',
+  last4: '4242',
 });
 const mockRevealCard = jest.fn().mockResolvedValue({
-  number: '4242424242424242', cvc: '123', expMonth: 12, expYear: 2027, last4: '4242',
+  number: '4242424242424242',
+  cvc: '123',
+  expMonth: 12,
+  expYear: 2027,
+  last4: '4242',
 });
 const mockCancelCard = jest.fn().mockResolvedValue(undefined);
-const mockGetIssuingBalance = jest.fn().mockResolvedValue({ available: 999_999_99, currency: 'gbp' });
+const mockGetIssuingBalance = jest
+  .fn()
+  .mockResolvedValue({ available: 999_999_99, currency: 'gbp' });
 const mockPaymentProvider = {
   issueCard: mockIssueVirtualCard,
   revealCard: mockRevealCard,
@@ -114,9 +126,14 @@ let TEST_KEY_HASH: string;
 
 const dbUsers: Record<string, any> = {
   'user-1': {
-    id: 'user-1', email: 'test@agentpay.dev', mainBalance: 100000,
-    maxBudgetPerIntent: 50000, merchantAllowlist: [], mccAllowlist: [],
-    apiKeyHash: null, apiKeyPrefix: TEST_KEY_PREFIX,
+    id: 'user-1',
+    email: 'test@agentpay.dev',
+    mainBalance: 100000,
+    maxBudgetPerIntent: 50000,
+    merchantAllowlist: [],
+    mccAllowlist: [],
+    apiKeyHash: null,
+    apiKeyPrefix: TEST_KEY_PREFIX,
   },
 };
 const dbIntents: Record<string, any> = {};
@@ -130,7 +147,9 @@ jest.mock('@/db/client', () => ({
       findUnique: jest.fn(({ where }: any) => {
         if (where.id) return Promise.resolve(dbUsers[where.id] ?? null);
         if (where.apiKeyPrefix) {
-          const found = Object.values(dbUsers).find((u: any) => u.apiKeyPrefix === where.apiKeyPrefix);
+          const found = Object.values(dbUsers).find(
+            (u: any) => u.apiKeyPrefix === where.apiKeyPrefix,
+          );
           return Promise.resolve(found ?? null);
         }
         return Promise.resolve(null);
@@ -138,7 +157,12 @@ jest.mock('@/db/client', () => ({
     },
     purchaseIntent: {
       create: jest.fn(({ data }: any) => {
-        const intent = { id: `intent-${Date.now()}`, ...data, createdAt: new Date(), updatedAt: new Date() };
+        const intent = {
+          id: `intent-${Date.now()}`,
+          ...data,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
         dbIntents[intent.id] = intent;
         return Promise.resolve(intent);
       }),
@@ -242,7 +266,11 @@ describe('POST /v1/intents wiring', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/intents',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'idem-1', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'idem-1',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ query: 'headphones', maxBudget: 10000, currency: 'gbp' }),
     });
 
@@ -256,7 +284,11 @@ describe('POST /v1/intents wiring', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/intents',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'idem-2', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'idem-2',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ query: 'Sony headphones', maxBudget: 30000, currency: 'gbp' }),
     });
 
@@ -276,7 +308,11 @@ describe('POST /v1/intents wiring', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/intents',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'idem-3', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'idem-3',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ query: 'test', maxBudget: 5000, currency: 'gbp' }),
     });
 
@@ -289,7 +325,14 @@ describe('POST /v1/intents wiring', () => {
 
 describe('POST /v1/agent/quote wiring', () => {
   function seedSearchingIntent(id: string) {
-    dbIntents[id] = { id, userId: 'user-1', status: IntentStatus.SEARCHING, metadata: {}, maxBudget: 10000, currency: 'gbp' };
+    dbIntents[id] = {
+      id,
+      userId: 'user-1',
+      status: IntentStatus.SEARCHING,
+      metadata: {},
+      maxBudget: 10000,
+      currency: 'gbp',
+    };
   }
 
   it('calls receiveQuote then requestApproval via orchestrator', async () => {
@@ -299,15 +342,24 @@ describe('POST /v1/agent/quote wiring', () => {
       method: 'POST',
       url: '/v1/agent/quote',
       headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
-      body: JSON.stringify({ intentId: 'intent-q1', merchantName: 'Amazon UK', merchantUrl: 'https://amazon.co.uk', price: 9999, currency: 'gbp' }),
+      body: JSON.stringify({
+        intentId: 'intent-q1',
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 9999,
+        currency: 'gbp',
+      }),
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockReceiveQuote).toHaveBeenCalledWith('intent-q1', expect.objectContaining({
-      merchantName: 'Amazon UK',
-      merchantUrl: 'https://amazon.co.uk',
-      price: 9999,
-    }));
+    expect(mockReceiveQuote).toHaveBeenCalledWith(
+      'intent-q1',
+      expect.objectContaining({
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 9999,
+      }),
+    );
     expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1');
   });
 
@@ -318,7 +370,13 @@ describe('POST /v1/agent/quote wiring', () => {
       method: 'POST',
       url: '/v1/agent/quote',
       headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
-      body: JSON.stringify({ intentId: 'intent-q2', merchantName: 'X', merchantUrl: 'https://x.com', price: 1, currency: 'gbp' }),
+      body: JSON.stringify({
+        intentId: 'intent-q2',
+        merchantName: 'X',
+        merchantUrl: 'https://x.com',
+        price: 1,
+        currency: 'gbp',
+      }),
     });
 
     expect(mockReceiveQuote).not.toHaveBeenCalled();
@@ -332,7 +390,13 @@ describe('POST /v1/agent/quote wiring', () => {
       method: 'POST',
       url: '/v1/agent/quote',
       headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
-      body: JSON.stringify({ intentId: 'intent-q3', merchantName: 'Amazon UK', merchantUrl: 'https://amazon.co.uk', price: 9999, currency: 'gbp' }),
+      body: JSON.stringify({
+        intentId: 'intent-q3',
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 9999,
+        currency: 'gbp',
+      }),
     });
 
     // Allow the fire-and-forget promise to settle
@@ -363,11 +427,20 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a1/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-1', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-1',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1', reason: 'looks good' }),
     });
 
-    expect(mockRecordDecision).toHaveBeenCalledWith('intent-a1', 'APPROVED', 'user-1', 'looks good');
+    expect(mockRecordDecision).toHaveBeenCalledWith(
+      'intent-a1',
+      'APPROVED',
+      'user-1',
+      'looks good',
+    );
   });
 
   it('calls reserveForIntent with userId and maxBudget', async () => {
@@ -376,7 +449,11 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a2/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-2', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-2',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
@@ -389,11 +466,20 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a3/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-3', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-3',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
-    expect(mockIssueVirtualCard).toHaveBeenCalledWith('intent-a3', 10000, 'gbp', expect.any(Object));
+    expect(mockIssueVirtualCard).toHaveBeenCalledWith(
+      'intent-a3',
+      10000,
+      'gbp',
+      expect.any(Object),
+    );
   });
 
   it('calls markCardIssued and startCheckout via orchestrator', async () => {
@@ -402,7 +488,11 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a4/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-4', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-4',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
@@ -416,16 +506,23 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a5/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-5', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-5',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
-    expect(mockEnqueueCheckout).toHaveBeenCalledWith('intent-a5', expect.objectContaining({
-      intentId: 'intent-a5',
-      userId: 'user-1',
-      stripeCardId: 'ic_test',
-      last4: '4242',
-    }));
+    expect(mockEnqueueCheckout).toHaveBeenCalledWith(
+      'intent-a5',
+      expect.objectContaining({
+        intentId: 'intent-a5',
+        userId: 'user-1',
+        stripeCardId: 'ic_test',
+        last4: '4242',
+      }),
+    );
   });
 
   it('returns returnIntent funds if card issuance fails', async () => {
@@ -435,7 +532,11 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a6/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-6', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-6',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
@@ -452,7 +553,11 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a7/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-7', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-7',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
@@ -463,14 +568,27 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
   it('calls getIssuingBalance before recordDecision and reserveForIntent', async () => {
     seedAwaitingIntent('intent-a9');
     const order: string[] = [];
-    mockGetIssuingBalance.mockImplementationOnce(() => { order.push('getIssuingBalance'); return Promise.resolve({ available: 999_999_99, currency: 'gbp' }); });
-    mockRecordDecision.mockImplementationOnce(() => { order.push('recordDecision'); return Promise.resolve({ decision: 'APPROVED' }); });
-    mockReserveForIntent.mockImplementationOnce(() => { order.push('reserveForIntent'); return Promise.resolve({ id: 'pot-1', reservedAmount: 10000 }); });
+    mockGetIssuingBalance.mockImplementationOnce(() => {
+      order.push('getIssuingBalance');
+      return Promise.resolve({ available: 999_999_99, currency: 'gbp' });
+    });
+    mockRecordDecision.mockImplementationOnce(() => {
+      order.push('recordDecision');
+      return Promise.resolve({ decision: 'APPROVED' });
+    });
+    mockReserveForIntent.mockImplementationOnce(() => {
+      order.push('reserveForIntent');
+      return Promise.resolve({ id: 'pot-1', reservedAmount: 10000 });
+    });
 
     await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a9/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-9', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-9',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
@@ -484,7 +602,11 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a10/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-10', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-10',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
@@ -501,7 +623,11 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-a8/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'appr-8', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'appr-8',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
@@ -513,8 +639,12 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
 describe('POST /v1/approvals/:id/decision wiring — DENIED', () => {
   it('does NOT call reserveForIntent, issueVirtualCard, or enqueueCheckout when denied', async () => {
     dbIntents['intent-d1'] = {
-      id: 'intent-d1', userId: 'user-1', status: IntentStatus.AWAITING_APPROVAL,
-      maxBudget: 10000, currency: 'gbp', metadata: {},
+      id: 'intent-d1',
+      userId: 'user-1',
+      status: IntentStatus.AWAITING_APPROVAL,
+      maxBudget: 10000,
+      currency: 'gbp',
+      metadata: {},
       user: { id: 'user-1', email: 'test@agentpay.dev', mccAllowlist: [] },
     };
     mockRecordDecision.mockResolvedValueOnce({ decision: 'DENIED' });
@@ -522,7 +652,11 @@ describe('POST /v1/approvals/:id/decision wiring — DENIED', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/approvals/intent-d1/decision',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'deny-1', authorization: AUTH_HEADER },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'deny-1',
+        authorization: AUTH_HEADER,
+      },
       body: JSON.stringify({ decision: 'DENIED', actorId: 'user-1', reason: 'too expensive' }),
     });
 
@@ -597,7 +731,11 @@ describe('POST /v1/agent/result wiring — failure', () => {
       method: 'POST',
       url: '/v1/agent/result',
       headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
-      body: JSON.stringify({ intentId: 'intent-f1', success: false, errorMessage: 'Payment declined' }),
+      body: JSON.stringify({
+        intentId: 'intent-f1',
+        success: false,
+        errorMessage: 'Payment declined',
+      }),
     });
 
     expect(res.statusCode).toBe(200);
@@ -683,13 +821,20 @@ describe('GET /v1/agent/card/:intentId wiring', () => {
 
 describe('GET /v1/agent/decision/:intentId wiring', () => {
   function seedIntent(id: string, status: string, virtualCard?: any) {
-    dbIntents[id] = { id, userId: 'user-1', status, metadata: {}, maxBudget: 10000, currency: 'gbp' };
+    dbIntents[id] = {
+      id,
+      userId: 'user-1',
+      status,
+      metadata: {},
+      maxBudget: 10000,
+      currency: 'gbp',
+    };
     if (virtualCard !== undefined) {
       dbVirtualCards[id] = virtualCard;
     }
   }
 
-  function makeCard(intentId: string, revealedAt: Date | null = null) {
+  function _makeCard(intentId: string, revealedAt: Date | null = null) {
     return { id: 'vc-1', intentId, stripeCardId: 'ic_test', last4: '4242', revealedAt };
   }
 
@@ -872,7 +1017,9 @@ describe('POST /v1/agent/register wiring', () => {
 
   it('returns 409 when renewing an already-claimed agent', async () => {
     dbPairingCodes['ag_claimed'] = {
-      id: 'pc-1', agentId: 'ag_claimed', code: 'AAAABBBB',
+      id: 'pc-1',
+      agentId: 'ag_claimed',
+      code: 'AAAABBBB',
       claimedByUserId: 'user-existing',
       expiresAt: new Date(Date.now() + 60_000),
       createdAt: new Date(),
@@ -889,7 +1036,9 @@ describe('POST /v1/agent/register wiring', () => {
 
   it('renews code for unclaimed agent', async () => {
     dbPairingCodes['ag_renew'] = {
-      id: 'pc-2', agentId: 'ag_renew', code: 'OLDCOD12',
+      id: 'pc-2',
+      agentId: 'ag_renew',
+      code: 'OLDCOD12',
       claimedByUserId: null,
       expiresAt: new Date(Date.now() + 60_000),
       createdAt: new Date(Date.now() - 6 * 60 * 1000), // 6 min ago — past cooldown
@@ -938,7 +1087,9 @@ describe('GET /v1/agent/user wiring', () => {
 
   it('returns unclaimed status when code not yet used', async () => {
     dbPairingCodes['ag_pending'] = {
-      id: 'pc-3', agentId: 'ag_pending', code: 'PEND1234',
+      id: 'pc-3',
+      agentId: 'ag_pending',
+      code: 'PEND1234',
       claimedByUserId: null,
       expiresAt: new Date(Date.now() + 60_000),
       createdAt: new Date(),
@@ -956,7 +1107,9 @@ describe('GET /v1/agent/user wiring', () => {
 
   it('returns claimed status with userId after user signs up', async () => {
     dbPairingCodes['ag_done'] = {
-      id: 'pc-4', agentId: 'ag_done', code: 'DONE1234',
+      id: 'pc-4',
+      agentId: 'ag_done',
+      code: 'DONE1234',
       claimedByUserId: 'user-signup-1',
       expiresAt: new Date(Date.now() + 60_000),
       createdAt: new Date(),
