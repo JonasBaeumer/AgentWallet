@@ -13,9 +13,8 @@ import { prisma } from '@/db/client';
 import { reconcileIntent } from '@/payments/providers/stripe/reconciliationService';
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
-const describeIfStripe = STRIPE_KEY && !STRIPE_KEY.includes('placeholder')
-  ? describe
-  : describe.skip;
+const describeIfStripe =
+  STRIPE_KEY && !STRIPE_KEY.includes('placeholder') ? describe : describe.skip;
 
 let stripe: Stripe;
 let cardId: string;
@@ -28,7 +27,11 @@ describeIfStripe('Reconciliation integration', () => {
 
     // Create minimal DB records
     const user = await prisma.user.create({
-      data: { email: `recon-test-${Date.now()}@example.com`, telegramChatId: null, stripeCardholderId: null },
+      data: {
+        email: `recon-test-${Date.now()}@example.com`,
+        telegramChatId: null,
+        stripeCardholderId: null,
+      },
     });
     userId = user.id;
 
@@ -126,7 +129,7 @@ describeIfStripe('Reconciliation integration', () => {
     const report = await reconcileIntent(intentId);
 
     expect(report.inSync).toBe(false);
-    expect(report.discrepancies.some(d => d.includes('9999'))).toBe(true);
+    expect(report.discrepancies.some((d) => d.includes('9999'))).toBe(true);
 
     // Restore
     await prisma.pot.update({

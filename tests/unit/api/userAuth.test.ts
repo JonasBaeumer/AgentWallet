@@ -82,7 +82,10 @@ describe('userAuthMiddleware', () => {
     const hash = bcrypt.hashSync(correctKey, 10);
     const wrongKey = correctKey.slice(0, 16) + 'different-suffix';
     mockFindUnique.mockResolvedValue({
-      id: 'user-1', email: 'a@b.com', apiKeyHash: hash, apiKeyPrefix: correctKey.slice(0, 16),
+      id: 'user-1',
+      email: 'a@b.com',
+      apiKeyHash: hash,
+      apiKeyPrefix: correctKey.slice(0, 16),
     });
 
     const request = makeRequest({ authorization: `Bearer ${wrongKey}` });
@@ -100,7 +103,12 @@ describe('userAuthMiddleware', () => {
   it('attaches user to request when valid key is provided', async () => {
     const rawKey = crypto.randomBytes(32).toString('hex');
     const hash = bcrypt.hashSync(rawKey, 10);
-    const user = { id: 'user-42', email: 'alice@agentpay.dev', apiKeyHash: hash, apiKeyPrefix: rawKey.slice(0, 16) };
+    const user = {
+      id: 'user-42',
+      email: 'alice@agentpay.dev',
+      apiKeyHash: hash,
+      apiKeyPrefix: rawKey.slice(0, 16),
+    };
     mockFindUnique.mockResolvedValue(user);
 
     const request = makeRequest({ authorization: `Bearer ${rawKey}` });
@@ -119,7 +127,12 @@ describe('userAuthMiddleware', () => {
   it('looks up user by apiKeyPrefix via findUnique', async () => {
     const rawKey = crypto.randomBytes(32).toString('hex');
     const hash = bcrypt.hashSync(rawKey, 10);
-    const user = { id: 'user-1', email: 'a@b.com', apiKeyHash: hash, apiKeyPrefix: rawKey.slice(0, 16) };
+    const user = {
+      id: 'user-1',
+      email: 'a@b.com',
+      apiKeyHash: hash,
+      apiKeyPrefix: rawKey.slice(0, 16),
+    };
     mockFindUnique.mockResolvedValue(user);
 
     const request = makeRequest({ authorization: `Bearer ${rawKey}` });

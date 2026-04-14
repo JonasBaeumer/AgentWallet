@@ -19,14 +19,28 @@ describe('searchProcessor logic', () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, text: async () => '{}' });
 
     // Simulate what the processor does
-    const job = { data: { intentId: 'intent-1', userId: 'user-1', query: 'test', maxBudget: 5000, currency: 'gbp' } };
+    const job = {
+      data: {
+        intentId: 'intent-1',
+        userId: 'user-1',
+        query: 'test',
+        maxBudget: 5000,
+        currency: 'gbp',
+      },
+    };
     const apiBase = 'http://localhost:3000';
     const workerKey = 'local-dev-worker-key';
 
     await fetch(`${apiBase}/v1/agent/quote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Worker-Key': workerKey },
-      body: JSON.stringify({ intentId: job.data.intentId, merchantName: 'Amazon UK', merchantUrl: 'https://amazon.co.uk/stub', price: job.data.maxBudget, currency: job.data.currency }),
+      body: JSON.stringify({
+        intentId: job.data.intentId,
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk/stub',
+        price: job.data.maxBudget,
+        currency: job.data.currency,
+      }),
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
@@ -48,7 +62,11 @@ describe('searchProcessor logic', () => {
     await fetch(`${apiBase}/v1/agent/result`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Worker-Key': workerKey },
-      body: JSON.stringify({ intentId: job.data.intentId, success: true, actualAmount: job.data.price }),
+      body: JSON.stringify({
+        intentId: job.data.intentId,
+        success: true,
+        actualAmount: job.data.price,
+      }),
     });
 
     expect(global.fetch).toHaveBeenCalledWith(

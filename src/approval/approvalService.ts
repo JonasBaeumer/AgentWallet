@@ -48,7 +48,8 @@ export async function recordDecision(
   });
 
   // Transition intent state
-  const newStatus = decision === ApprovalDecisionType.APPROVED ? IntentStatus.APPROVED : IntentStatus.DENIED;
+  const newStatus =
+    decision === ApprovalDecisionType.APPROVED ? IntentStatus.APPROVED : IntentStatus.DENIED;
   await prisma.purchaseIntent.update({ where: { id: intentId }, data: { status: newStatus } });
   await prisma.auditEvent.create({
     data: {

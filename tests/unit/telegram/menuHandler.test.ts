@@ -160,8 +160,20 @@ describe('menu_history', () => {
   it('shows last 5 DONE intents', async () => {
     (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
     (mockPrisma.purchaseIntent.findMany as jest.Mock).mockResolvedValue([
-      { id: 'i1', subject: 'headphones', query: 'headphones', maxBudget: 4500, pot: { settledAmount: 4500 } },
-      { id: 'i2', subject: 'coffee maker', query: 'coffee', maxBudget: 8900, pot: { settledAmount: 8900 } },
+      {
+        id: 'i1',
+        subject: 'headphones',
+        query: 'headphones',
+        maxBudget: 4500,
+        pot: { settledAmount: 4500 },
+      },
+      {
+        id: 'i2',
+        subject: 'coffee maker',
+        query: 'coffee',
+        maxBudget: 8900,
+        pot: { settledAmount: 8900 },
+      },
     ]);
 
     await handleMenuCallback(
@@ -202,8 +214,20 @@ describe('menu_cancel_list', () => {
   it('renders one button per active intent', async () => {
     (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
     (mockPrisma.purchaseIntent.findMany as jest.Mock).mockResolvedValue([
-      { id: 'i1', subject: 'headphones', query: 'headphones', maxBudget: 5000, status: 'SEARCHING' },
-      { id: 'i2', subject: 'coffee', query: 'coffee', maxBudget: 8900, status: 'AWAITING_APPROVAL' },
+      {
+        id: 'i1',
+        subject: 'headphones',
+        query: 'headphones',
+        maxBudget: 5000,
+        status: 'SEARCHING',
+      },
+      {
+        id: 'i2',
+        subject: 'coffee',
+        query: 'coffee',
+        maxBudget: 8900,
+        status: 'AWAITING_APPROVAL',
+      },
     ]);
 
     await handleMenuCallback(
@@ -217,7 +241,9 @@ describe('menu_cancel_list', () => {
 
     const keyboard = mockEditMessageText.mock.calls[0][3].reply_markup;
     const buttons = keyboard.inline_keyboard.flat();
-    const cancelButtons = buttons.filter((b: any) => b.callback_data?.startsWith('menu_cancel_confirm:'));
+    const cancelButtons = buttons.filter((b: any) =>
+      b.callback_data?.startsWith('menu_cancel_confirm:'),
+    );
     expect(cancelButtons).toHaveLength(2);
   });
 
@@ -392,12 +418,18 @@ describe('menu_pref_policy', () => {
 
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
-      chatId, messageId, 'menu_pref_policy', 'IMMEDIATE', fromId,
+      chatId,
+      messageId,
+      'menu_pref_policy',
+      'IMMEDIATE',
+      fromId,
     );
 
-    expect(mockPrisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: { cancelPolicy: 'IMMEDIATE' },
-    }));
+    expect(mockPrisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { cancelPolicy: 'IMMEDIATE' },
+      }),
+    );
     const text = mockEditMessageText.mock.calls[0][2] as string;
     expect(text.toLowerCase()).toContain('saved');
   });
@@ -407,7 +439,11 @@ describe('menu_pref_policy', () => {
 
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
-      chatId, messageId, 'menu_pref_policy', 'AFTER_TTL', fromId,
+      chatId,
+      messageId,
+      'menu_pref_policy',
+      'AFTER_TTL',
+      fromId,
     );
 
     const opts = mockEditMessageText.mock.calls[0][3];
@@ -426,12 +462,18 @@ describe('menu_pref_ttl', () => {
 
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
-      chatId, messageId, 'menu_pref_ttl', '60', fromId,
+      chatId,
+      messageId,
+      'menu_pref_ttl',
+      '60',
+      fromId,
     );
 
-    expect(mockPrisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: { cancelPolicy: 'AFTER_TTL', cardTtlMinutes: 60 },
-    }));
+    expect(mockPrisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { cancelPolicy: 'AFTER_TTL', cardTtlMinutes: 60 },
+      }),
+    );
     const text = mockEditMessageText.mock.calls[0][2] as string;
     expect(text).toContain('60 min');
   });
@@ -439,10 +481,17 @@ describe('menu_pref_ttl', () => {
   it('sets Redis session, clears keyboard, and sends ForceReply prompt when custom is selected', async () => {
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
-      chatId, messageId, 'menu_pref_ttl', 'custom', fromId,
+      chatId,
+      messageId,
+      'menu_pref_ttl',
+      'custom',
+      fromId,
     );
 
-    expect(mockSetPrefSession).toHaveBeenCalledWith(chatId, { awaitingCustomTtl: true, promptMessageId: expect.any(Number) });
+    expect(mockSetPrefSession).toHaveBeenCalledWith(chatId, {
+      awaitingCustomTtl: true,
+      promptMessageId: expect.any(Number),
+    });
     // Original keyboard message is edited to remove buttons
     expect(mockEditMessageText).toHaveBeenCalled();
     // A new ForceReply message is sent
@@ -460,7 +509,11 @@ describe('menu_card_cancel', () => {
   it('calls cancelCard and confirms', async () => {
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
-      chatId, messageId, 'menu_card_cancel', 'intent-abc', fromId,
+      chatId,
+      messageId,
+      'menu_card_cancel',
+      'intent-abc',
+      fromId,
     );
 
     expect(mockCancelCard).toHaveBeenCalledWith('intent-abc');
@@ -473,7 +526,11 @@ describe('menu_card_cancel', () => {
 
     await handleMenuCallback(
       { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
-      chatId, messageId, 'menu_card_cancel', 'intent-abc', fromId,
+      chatId,
+      messageId,
+      'menu_card_cancel',
+      'intent-abc',
+      fromId,
     );
 
     const text = mockEditMessageText.mock.calls[0][2] as string;

@@ -62,7 +62,7 @@ describe('sendApprovalRequest', () => {
     await sendApprovalRequest('intent-1');
 
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    const [chatId, text, options] = mockSendMessage.mock.calls[0];
+    const [chatId, , options] = mockSendMessage.mock.calls[0];
     expect(chatId).toBe('123456789');
     expect(options.parse_mode).toBe('HTML');
     expect(options.reply_markup).toBeDefined();

@@ -31,8 +31,12 @@ jest.mock('@/payments/providers/stripe/stripeClient', () => ({
     issuing: {
       cardholders: { create: jest.fn().mockResolvedValue({ id: 'ich_test' }) },
       cards: {
-        create: jest.fn().mockResolvedValue({ id: 'ic_test', last4: '4242', exp_month: 12, exp_year: 2027 }),
-        retrieve: jest.fn().mockResolvedValue({ id: 'ic_test', last4: '4242', exp_month: 12, exp_year: 2027 }),
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'ic_test', last4: '4242', exp_month: 12, exp_year: 2027 }),
+        retrieve: jest
+          .fn()
+          .mockResolvedValue({ id: 'ic_test', last4: '4242', exp_month: 12, exp_year: 2027 }),
       },
     },
     webhooks: { constructEvent: jest.fn() },
@@ -64,7 +68,12 @@ jest.mock('@/db/client', () => ({
   prisma: {
     purchaseIntent: {
       create: jest.fn(({ data }: any) => {
-        const intent = { id: `intent-${Date.now()}`, ...data, updatedAt: new Date(), createdAt: new Date() };
+        const intent = {
+          id: `intent-${Date.now()}`,
+          ...data,
+          updatedAt: new Date(),
+          createdAt: new Date(),
+        };
         store.intents[intent.id] = intent;
         return Promise.resolve(intent);
       }),
@@ -92,7 +101,9 @@ jest.mock('@/db/client', () => ({
       findUnique: jest.fn(({ where }: any) => {
         if (where.id) return Promise.resolve(store.users[where.id] ?? null);
         if (where.apiKeyPrefix) {
-          const match = Object.values(store.users).find((u: any) => u.apiKeyPrefix === where.apiKeyPrefix);
+          const match = Object.values(store.users).find(
+            (u: any) => u.apiKeyPrefix === where.apiKeyPrefix,
+          );
           return Promise.resolve(match ?? null);
         }
         return Promise.resolve(null);
@@ -134,16 +145,21 @@ jest.mock('@/db/client', () => ({
       ),
     },
     idempotencyRecord: {
-      findUnique: jest.fn(({ where }: any) => Promise.resolve(store.idempotencyRecords[where.key] ?? null)),
+      findUnique: jest.fn(({ where }: any) =>
+        Promise.resolve(store.idempotencyRecords[where.key] ?? null),
+      ),
       upsert: jest.fn(({ where, create }: any) => {
         if (!store.idempotencyRecords[where.key]) store.idempotencyRecords[where.key] = create;
         return Promise.resolve(store.idempotencyRecords[where.key]);
       }),
     },
     approvalDecision: {
-      findUnique: jest.fn(({ where }: any) => Promise.resolve(store.approvalDecisions[where.intentId] ?? null)),
+      findUnique: jest.fn(({ where }: any) =>
+        Promise.resolve(store.approvalDecisions[where.intentId] ?? null),
+      ),
       upsert: jest.fn(({ where, create }: any) => {
-        if (!store.approvalDecisions[where.intentId]) store.approvalDecisions[where.intentId] = create;
+        if (!store.approvalDecisions[where.intentId])
+          store.approvalDecisions[where.intentId] = create;
         return Promise.resolve(store.approvalDecisions[where.intentId]);
       }),
       create: jest.fn(({ data }: any) => {
@@ -155,7 +171,12 @@ jest.mock('@/db/client', () => ({
       findUnique: jest.fn(({ where }: any) => Promise.resolve(store.pots[where.intentId] ?? null)),
       findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(({ data }: any) => {
-        const pot = { id: `pot-${Date.now()}`, ...data, createdAt: new Date(), updatedAt: new Date() };
+        const pot = {
+          id: `pot-${Date.now()}`,
+          ...data,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
         store.pots[data.intentId] = pot;
         return Promise.resolve(pot);
       }),
@@ -197,9 +218,16 @@ jest.mock('@/db/client', () => ({
           }),
         },
         pot: {
-          findUnique: jest.fn(({ where }: any) => Promise.resolve(store.pots[where.intentId] ?? null)),
+          findUnique: jest.fn(({ where }: any) =>
+            Promise.resolve(store.pots[where.intentId] ?? null),
+          ),
           create: jest.fn(({ data }: any) => {
-            const pot = { id: `pot-${Date.now()}`, ...data, createdAt: new Date(), updatedAt: new Date() };
+            const pot = {
+              id: `pot-${Date.now()}`,
+              ...data,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            };
             store.pots[data.intentId] = pot;
             return Promise.resolve(pot);
           }),
@@ -263,7 +291,11 @@ describe('Happy path: RECEIVED → DONE', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/intents',
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'hp-idem-1', authorization: authHeader },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'hp-idem-1',
+        authorization: authHeader,
+      },
       body: JSON.stringify({ query: 'Sony WH-1000XM5', maxBudget: 30000, currency: 'gbp' }),
     });
     expect(res.statusCode).toBe(201);
@@ -294,7 +326,11 @@ describe('Happy path: RECEIVED → DONE', () => {
     const res = await app.inject({
       method: 'POST',
       url: `/v1/approvals/${intentId}/decision`,
-      headers: { 'content-type': 'application/json', 'x-idempotency-key': 'hp-approval-1', authorization: authHeader },
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'hp-approval-1',
+        authorization: authHeader,
+      },
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-demo' }),
     });
     expect(res.statusCode).toBe(200);
@@ -316,7 +352,12 @@ describe('Happy path: RECEIVED → DONE', () => {
       method: 'POST',
       url: '/v1/agent/result',
       headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
-      body: JSON.stringify({ intentId, success: true, actualAmount: 27999, receiptUrl: 'https://amazon.co.uk/receipt/123' }),
+      body: JSON.stringify({
+        intentId,
+        success: true,
+        actualAmount: 27999,
+        receiptUrl: 'https://amazon.co.uk/receipt/123',
+      }),
     });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).status).toBe('DONE');

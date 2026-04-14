@@ -2,6 +2,7 @@
 
 > The secure payment rail every AI agent runs on. The agent can't spend a cent more than you said.
 
+[![CI](https://github.com/JonasBaeumer/trustedpaymentinfrastructureforagents/actions/workflows/ci.yml/badge.svg)](https://github.com/JonasBaeumer/trustedpaymentinfrastructureforagents/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Fastify](https://img.shields.io/badge/Fastify-4.x-black?logo=fastify)](https://fastify.dev/)
 [![Stripe Issuing](https://img.shields.io/badge/Stripe-Issuing-635BFF?logo=stripe)](https://stripe.com/docs/issuing)

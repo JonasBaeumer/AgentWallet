@@ -6,11 +6,13 @@ export const logger = pino(
   {
     level: process.env.LOG_LEVEL ?? 'info',
     redact: {
-      paths: ['req.headers.authorization', 'req.headers["stripe-signature"]', 'req.headers["x-worker-key"]'],
+      paths: [
+        'req.headers.authorization',
+        'req.headers["stripe-signature"]',
+        'req.headers["x-worker-key"]',
+      ],
       censor: '[REDACTED]',
     },
   },
-  usePretty
-    ? pino.transport({ target: 'pino-pretty', options: { colorize: true } })
-    : undefined,
+  usePretty ? pino.transport({ target: 'pino-pretty', options: { colorize: true } }) : undefined,
 );

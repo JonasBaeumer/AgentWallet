@@ -1,8 +1,4 @@
-import {
-  getTelegramMockCalls,
-  clearTelegramMockCalls,
-  getMockBot,
-} from '@/telegram/mockBot';
+import { getTelegramMockCalls, clearTelegramMockCalls, getMockBot } from '@/telegram/mockBot';
 
 beforeEach(() => {
   clearTelegramMockCalls();

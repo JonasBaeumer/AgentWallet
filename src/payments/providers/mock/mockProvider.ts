@@ -20,7 +20,11 @@ export class MockPaymentProvider implements IPaymentProvider {
     currency: string,
     options?: { mccAllowlist?: string[] },
   ): Promise<VirtualCardData> {
-    this.calls.push({ method: 'issueCard', args: [intentId, amount, currency, options], timestamp: Date.now() });
+    this.calls.push({
+      method: 'issueCard',
+      args: [intentId, amount, currency, options],
+      timestamp: Date.now(),
+    });
     return {
       id: `mock-card-${intentId}`,
       intentId,
@@ -46,8 +50,15 @@ export class MockPaymentProvider implements IPaymentProvider {
     this.calls.push({ method: 'cancelCard', args: [intentId], timestamp: Date.now() });
   }
 
-  async handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>> {
-    this.calls.push({ method: 'handleWebhookEvent', args: [rawBody, signature], timestamp: Date.now() });
+  async handleWebhookEvent(
+    rawBody: Buffer | string,
+    signature: string,
+  ): Promise<Record<string, unknown>> {
+    this.calls.push({
+      method: 'handleWebhookEvent',
+      args: [rawBody, signature],
+      timestamp: Date.now(),
+    });
     return { received: true };
   }
 

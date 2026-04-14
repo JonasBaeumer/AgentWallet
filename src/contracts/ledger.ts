@@ -1,4 +1,7 @@
-import { LedgerEntryType as PrismaLedgerEntryType, PotStatus as PrismaPotStatus } from '@prisma/client';
+import {
+  LedgerEntryType as PrismaLedgerEntryType,
+  PotStatus as PrismaPotStatus,
+} from '@prisma/client';
 
 export { PrismaLedgerEntryType as LedgerEntryType, PrismaPotStatus as PotStatus };
 

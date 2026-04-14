@@ -47,8 +47,15 @@ describe('expireIntent cleanup', () => {
   });
 
   it('calls cancelCard and returnIntent when card and active pot exist', async () => {
-    (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue({ id: 'card-1', intentId: 'intent-1' });
-    (mockPrisma.pot.findFirst as jest.Mock).mockResolvedValue({ id: 'pot-1', intentId: 'intent-1', status: 'ACTIVE' });
+    (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue({
+      id: 'card-1',
+      intentId: 'intent-1',
+    });
+    (mockPrisma.pot.findFirst as jest.Mock).mockResolvedValue({
+      id: 'pot-1',
+      intentId: 'intent-1',
+      status: 'ACTIVE',
+    });
 
     await expireIntent('intent-1');
 
@@ -57,7 +64,10 @@ describe('expireIntent cleanup', () => {
   });
 
   it('calls cancelCard but not returnIntent when card exists but no active pot', async () => {
-    (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue({ id: 'card-1', intentId: 'intent-1' });
+    (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue({
+      id: 'card-1',
+      intentId: 'intent-1',
+    });
     (mockPrisma.pot.findFirst as jest.Mock).mockResolvedValue(null);
 
     await expireIntent('intent-1');
@@ -77,8 +87,15 @@ describe('expireIntent cleanup', () => {
   });
 
   it('resolves and still calls returnIntent when cancelCard throws', async () => {
-    (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue({ id: 'card-1', intentId: 'intent-1' });
-    (mockPrisma.pot.findFirst as jest.Mock).mockResolvedValue({ id: 'pot-1', intentId: 'intent-1', status: 'ACTIVE' });
+    (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue({
+      id: 'card-1',
+      intentId: 'intent-1',
+    });
+    (mockPrisma.pot.findFirst as jest.Mock).mockResolvedValue({
+      id: 'pot-1',
+      intentId: 'intent-1',
+      status: 'ACTIVE',
+    });
     mockCancelCard.mockRejectedValue(new Error('Stripe error'));
 
     await expect(expireIntent('intent-1')).resolves.toEqual(mockTransitionResult);
@@ -86,8 +103,15 @@ describe('expireIntent cleanup', () => {
   });
 
   it('resolves when returnIntent throws', async () => {
-    (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue({ id: 'card-1', intentId: 'intent-1' });
-    (mockPrisma.pot.findFirst as jest.Mock).mockResolvedValue({ id: 'pot-1', intentId: 'intent-1', status: 'ACTIVE' });
+    (mockPrisma.virtualCard.findUnique as jest.Mock).mockResolvedValue({
+      id: 'card-1',
+      intentId: 'intent-1',
+    });
+    (mockPrisma.pot.findFirst as jest.Mock).mockResolvedValue({
+      id: 'pot-1',
+      intentId: 'intent-1',
+      status: 'ACTIVE',
+    });
     mockReturnIntent.mockRejectedValue(new Error('Ledger error'));
 
     await expect(expireIntent('intent-1')).resolves.toEqual(mockTransitionResult);
@@ -103,7 +127,9 @@ describe('expireIntent cleanup', () => {
   });
 
   it('resolves when a Prisma lookup inside cleanup throws', async () => {
-    (mockPrisma.virtualCard.findUnique as jest.Mock).mockRejectedValue(new Error('DB connection lost'));
+    (mockPrisma.virtualCard.findUnique as jest.Mock).mockRejectedValue(
+      new Error('DB connection lost'),
+    );
 
     await expect(expireIntent('intent-1')).resolves.toEqual(mockTransitionResult);
   });

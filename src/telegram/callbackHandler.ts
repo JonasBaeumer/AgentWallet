@@ -47,19 +47,34 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
     const session = await getSignupSession(fromId);
 
     if (!session || session.step !== 'awaiting_confirmation') {
-      await editMessage(bot, chatId, messageId, '⚠️ Session expired or not found. Please start again with /start <code>.');
+      await editMessage(
+        bot,
+        chatId,
+        messageId,
+        '⚠️ Session expired or not found. Please start again with /start <code>.',
+      );
       return;
     }
 
     if (action === 'link_cancel') {
       await clearSignupSession(fromId);
-      await editMessage(bot, chatId, messageId, '❌ Linking cancelled. You can start again with /start <code>.');
+      await editMessage(
+        bot,
+        chatId,
+        messageId,
+        '❌ Linking cancelled. You can start again with /start <code>.',
+      );
       return;
     }
 
     // link_confirm: advance session to awaiting_email
     await setSignupSession(fromId, { ...session, step: 'awaiting_email' });
-    await editMessage(bot, chatId, messageId, `✅ Confirmed! What email address should we use for your account?`);
+    await editMessage(
+      bot,
+      chatId,
+      messageId,
+      `✅ Confirmed! What email address should we use for your account?`,
+    );
     return;
   }
 
@@ -111,7 +126,11 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
       // Check Stripe Issuing balance BEFORE persisting the decision
       const issuingBalance = await getPaymentProvider().getIssuingBalance(intent.currency);
       if (issuingBalance.available < intent.maxBudget) {
-        throw new InsufficientIssuingBalanceError(issuingBalance.available, intent.maxBudget, intent.currency);
+        throw new InsufficientIssuingBalanceError(
+          issuingBalance.available,
+          intent.maxBudget,
+          intent.currency,
+        );
       }
 
       await recordDecision(intentId, ApprovalDecisionType.APPROVED, actorId);
@@ -147,12 +166,21 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
     }
   } catch (err) {
     if (err instanceof InsufficientIssuingBalanceError) {
-      await editMessage(bot, chatId, messageId,
-        `⚠️ Insufficient Stripe Issuing balance (${err.currency}): available ${err.available}, required ${err.required}.`);
+      await editMessage(
+        bot,
+        chatId,
+        messageId,
+        `⚠️ Insufficient Stripe Issuing balance (${err.currency}): available ${err.available}, required ${err.required}.`,
+      );
       return;
     }
     log.error({ intentId, action, actorId, err }, 'Telegram approval callback failed');
-    await editMessage(bot, chatId, messageId, '⚠️ Something went wrong processing your decision. Please try via the app.');
+    await editMessage(
+      bot,
+      chatId,
+      messageId,
+      '⚠️ Something went wrong processing your decision. Please try via the app.',
+    );
     throw err;
   }
 

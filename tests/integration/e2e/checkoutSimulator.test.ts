@@ -28,7 +28,7 @@
  */
 
 import { prisma } from '@/db/client';
-import { getRedisClient, disconnectRedis } from '@/config/redis';
+import { disconnectRedis } from '@/config/redis';
 import { createStripeProvider } from '@/payments/testHelpers';
 import { IntentStatus } from '@/contracts';
 
@@ -203,7 +203,6 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
       const captured = await stripeCtx.stripe.testHelpers.issuing.authorizations.capture(auth.id);
       expect(captured.status).toBe('closed');
     });
-
   });
 
   // ─── 3. runSimulatedCheckout ─────────────────────────────────────────────────

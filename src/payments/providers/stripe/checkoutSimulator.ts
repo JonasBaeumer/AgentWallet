@@ -38,7 +38,10 @@ export async function runSimulatedCheckout(params: {
     });
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      log.error({ intentId, type: err.type, code: err.code, err }, 'checkoutSimulator: authorization create failed');
+      log.error(
+        { intentId, type: err.type, code: err.code, err },
+        'checkoutSimulator: authorization create failed',
+      );
     }
     throw err;
   }
@@ -58,7 +61,10 @@ export async function runSimulatedCheckout(params: {
     await stripe.testHelpers.issuing.authorizations.capture(auth.id);
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      log.error({ intentId, type: err.type, code: err.code, err }, 'checkoutSimulator: authorization capture failed');
+      log.error(
+        { intentId, type: err.type, code: err.code, err },
+        'checkoutSimulator: authorization capture failed',
+      );
     }
     throw err;
   }

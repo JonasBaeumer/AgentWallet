@@ -152,7 +152,8 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
 
     // Bot should have edited the message asking for email
     expect(mockEditMessageText).toHaveBeenCalledWith(
-      expect.anything(), expect.anything(),
+      expect.anything(),
+      expect.anything(),
       expect.stringContaining('email'),
       expect.any(Object),
     );
@@ -174,7 +175,11 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     await new Promise((r) => setTimeout(r, 300));
 
     // Bot should have confirmed account creation (message includes API key)
-    expect(mockSendMessage).toHaveBeenLastCalledWith(chatId, expect.stringContaining('Account created'), expect.any(Object));
+    expect(mockSendMessage).toHaveBeenLastCalledWith(
+      chatId,
+      expect.stringContaining('Account created'),
+      expect.any(Object),
+    );
 
     // Verify user exists in DB with correct fields
     const user = await prisma.user.findUnique({ where: { email: testEmail } });
@@ -209,7 +214,10 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     const intentRes = await app.inject({
       method: 'POST',
       url: '/v1/intents',
-      headers: { 'x-idempotency-key': `onboarding-intent-${Date.now()}`, authorization: `Bearer ${rawKey}` },
+      headers: {
+        'x-idempotency-key': `onboarding-intent-${Date.now()}`,
+        authorization: `Bearer ${rawKey}`,
+      },
       payload: {
         query: 'Sony WH-1000XM5 headphones',
         subject: 'Buy Sony headphones',
@@ -280,7 +288,10 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
       method: 'POST',
       url: '/v1/webhooks/telegram',
       headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
-      payload: { update_id: 2001, message: { message_id: 1, chat: { id: chatId }, text: `/start ${pairingCode}` } },
+      payload: {
+        update_id: 2001,
+        message: { message_id: 1, chat: { id: chatId }, text: `/start ${pairingCode}` },
+      },
     });
     await new Promise((r) => setTimeout(r, 200));
     // User taps Confirm
@@ -303,7 +314,10 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
       method: 'POST',
       url: '/v1/webhooks/telegram',
       headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
-      payload: { update_id: 2002, message: { message_id: 2, chat: { id: chatId }, text: 'claimed@example.com' } },
+      payload: {
+        update_id: 2002,
+        message: { message_id: 2, chat: { id: chatId }, text: 'claimed@example.com' },
+      },
     });
     // Wait for bcrypt.hash + DB transaction to complete (bcrypt cost=10 takes ~200 ms)
     await new Promise((r) => setTimeout(r, 500));

@@ -14,14 +14,20 @@ export async function userAuthMiddleware(
 ): Promise<void> {
   const authHeader = request.headers['authorization'];
   if (!authHeader?.startsWith('Bearer ')) {
-    return reply.status(401).header('WWW-Authenticate', 'Bearer realm="agentpay"').send({ error: 'Unauthorized: missing or invalid Authorization header' });
+    return reply
+      .status(401)
+      .header('WWW-Authenticate', 'Bearer realm="agentpay"')
+      .send({ error: 'Unauthorized: missing or invalid Authorization header' });
   }
   const rawKey = authHeader.slice(7);
 
   const prefix = rawKey.slice(0, 16);
   const user = await prisma.user.findUnique({ where: { apiKeyPrefix: prefix } });
   if (!user?.apiKeyHash || !(await bcrypt.compare(rawKey, user.apiKeyHash))) {
-    return reply.status(401).header('WWW-Authenticate', 'Bearer realm="agentpay"').send({ error: 'Unauthorized: invalid API key' });
+    return reply
+      .status(401)
+      .header('WWW-Authenticate', 'Bearer realm="agentpay"')
+      .send({ error: 'Unauthorized: invalid API key' });
   }
   request.user = user;
 }

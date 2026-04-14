@@ -1,20 +1,41 @@
-import { IntentEvent, IntentStatus, LedgerEntryType, PotStatus, ApprovalDecisionType } from '@/contracts';
+import {
+  IntentEvent,
+  IntentStatus,
+  LedgerEntryType,
+  PotStatus,
+  ApprovalDecisionType,
+} from '@/contracts';
 
 describe('Shared contracts — enums', () => {
   it('IntentStatus has all expected values', () => {
     const expected = [
-      'RECEIVED', 'SEARCHING', 'QUOTED', 'AWAITING_APPROVAL',
-      'APPROVED', 'CARD_ISSUED', 'CHECKOUT_RUNNING', 'DONE',
-      'FAILED', 'DENIED', 'EXPIRED',
+      'RECEIVED',
+      'SEARCHING',
+      'QUOTED',
+      'AWAITING_APPROVAL',
+      'APPROVED',
+      'CARD_ISSUED',
+      'CHECKOUT_RUNNING',
+      'DONE',
+      'FAILED',
+      'DENIED',
+      'EXPIRED',
     ];
     expected.forEach((v) => expect(Object.values(IntentStatus)).toContain(v));
   });
 
   it('IntentEvent has all expected values', () => {
     const expected = [
-      'INTENT_CREATED', 'QUOTE_RECEIVED', 'APPROVAL_REQUESTED',
-      'USER_APPROVED', 'USER_DENIED', 'CARD_ISSUED',
-      'CHECKOUT_STARTED', 'CHECKOUT_SUCCEEDED', 'CHECKOUT_FAILED', 'INTENT_EXPIRED',
+      'INTENT_CREATED',
+      'QUOTE_RECEIVED',
+      'APPROVAL_REQUESTED',
+      'USER_APPROVED',
+      'USER_DENIED',
+      'CARD_ISSUED',
+      'CHECKOUT_STARTED',
+      'CHECKOUT_SUCCEEDED',
+      'CHECKOUT_FAILED',
+      'INTENT_EXPIRED',
     ];
     expected.forEach((v) => expect(Object.values(IntentEvent)).toContain(v));
   });
