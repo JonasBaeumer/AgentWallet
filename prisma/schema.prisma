@@ -153,11 +153,14 @@ model AuditEvent {
   id        String   @id @default(cuid())
   intentId  String?
   actor     String
+  agentId   String?
   event     String
   payload   Json     @default("{}")
   createdAt DateTime @default(now())
 
   intent    PurchaseIntent? @relation(fields: [intentId], references: [id])
+
+  @@index([agentId])
 }
 
 model IdempotencyRecord {

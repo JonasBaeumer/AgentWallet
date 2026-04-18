@@ -359,8 +359,38 @@ describe('POST /v1/agent/quote wiring', () => {
         merchantUrl: 'https://amazon.co.uk',
         price: 9999,
       }),
+      undefined,
     );
-    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1');
+    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1', undefined);
+  });
+
+  it('propagates X-Agent-Id header to receiveQuote and requestApproval', async () => {
+    seedSearchingIntent('intent-q-agent');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: {
+        'content-type': 'application/json',
+        'x-worker-key': 'test-worker-key',
+        'x-agent-id': 'ag_from_header',
+      },
+      body: JSON.stringify({
+        intentId: 'intent-q-agent',
+        merchantName: 'X',
+        merchantUrl: 'https://x.com',
+        price: 100,
+        currency: 'gbp',
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockReceiveQuote).toHaveBeenCalledWith(
+      'intent-q-agent',
+      expect.any(Object),
+      'ag_from_header',
+    );
+    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q-agent', 'ag_from_header');
   });
 
   it('does NOT call receiveQuote for non-SEARCHING intent', async () => {
@@ -686,7 +716,7 @@ describe('POST /v1/agent/result wiring — success', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-r1', 8000);
+    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-r1', 8000, undefined);
     expect(mockSettleIntent).toHaveBeenCalledWith('intent-r1', 8000);
     expect(mockFailCheckout).not.toHaveBeenCalled();
     expect(mockReturnIntent).not.toHaveBeenCalled();
@@ -739,10 +769,27 @@ describe('POST /v1/agent/result wiring — failure', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f1', 'Payment declined');
+    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f1', 'Payment declined', undefined);
     expect(mockReturnIntent).toHaveBeenCalledWith('intent-f1');
     expect(mockCompleteCheckout).not.toHaveBeenCalled();
     expect(mockSettleIntent).not.toHaveBeenCalled();
+  });
+
+  it('propagates X-Agent-Id header to failCheckout', async () => {
+    seedRunningIntent('intent-f-agent');
+
+    await app.inject({
+      method: 'POST',
+      url: '/v1/agent/result',
+      headers: {
+        'content-type': 'application/json',
+        'x-worker-key': 'test-worker-key',
+        'x-agent-id': 'ag_from_header',
+      },
+      body: JSON.stringify({ intentId: 'intent-f-agent', success: false, errorMessage: 'nope' }),
+    });
+
+    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f-agent', 'nope', 'ag_from_header');
   });
 
   it('calls cancelCard after failed checkout', async () => {

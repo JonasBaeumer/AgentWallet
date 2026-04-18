@@ -93,4 +93,72 @@ describe('transitionIntent', () => {
       }),
     );
   });
+
+  describe('actor attribution', () => {
+    function runTransition() {
+      const mockIntent = { id: 'intent-1', status: IntentStatus.RECEIVED };
+      const auditCreateMock = jest.fn().mockResolvedValue({});
+      (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => {
+        const txMock = {
+          purchaseIntent: {
+            findUnique: jest.fn().mockResolvedValue(mockIntent),
+            update: jest.fn().mockResolvedValue({ ...mockIntent, status: IntentStatus.SEARCHING }),
+          },
+          auditEvent: { create: auditCreateMock },
+        };
+        return fn(txMock);
+      });
+      return { auditCreateMock };
+    }
+
+    it('defaults actor to "system" and agentId to null when no options passed', async () => {
+      const { auditCreateMock } = runTransition();
+      await transitionIntent('intent-1', IntentEvent.INTENT_CREATED);
+      expect(auditCreateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ actor: 'system', agentId: null }),
+        }),
+      );
+    });
+
+    it('uses agentId as actor and populates agentId column when only agentId provided', async () => {
+      const { auditCreateMock } = runTransition();
+      await transitionIntent('intent-1', IntentEvent.INTENT_CREATED, {}, { agentId: 'ag_abc123' });
+      expect(auditCreateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ actor: 'ag_abc123', agentId: 'ag_abc123' }),
+        }),
+      );
+    });
+
+    it('keeps explicit actor (e.g. user) and still records agentId separately', async () => {
+      const { auditCreateMock } = runTransition();
+      await transitionIntent(
+        'intent-1',
+        IntentEvent.INTENT_CREATED,
+        {},
+        { actor: 'user-1', agentId: 'ag_abc123' },
+      );
+      expect(auditCreateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ actor: 'user-1', agentId: 'ag_abc123' }),
+        }),
+      );
+    });
+
+    it('uses explicit actor without agentId when agent is not involved', async () => {
+      const { auditCreateMock } = runTransition();
+      await transitionIntent(
+        'intent-1',
+        IntentEvent.INTENT_CREATED,
+        {},
+        { actor: 'approval-service' },
+      );
+      expect(auditCreateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ actor: 'approval-service', agentId: null }),
+        }),
+      );
+    });
+  });
 });
