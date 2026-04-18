@@ -1,6 +1,14 @@
-import { PaymentProvider } from '@/contracts';
+import { PaymentProvider, IntentNotFoundError } from '@/contracts';
+import { Prisma } from '@prisma/client';
 
-describe('providerFactory', () => {
+jest.mock('@/db/client', () => ({
+  prisma: {
+    user: { findUniqueOrThrow: jest.fn() },
+    purchaseIntent: { findUniqueOrThrow: jest.fn() },
+  },
+}));
+
+describe('providerFactory — getPaymentProvider (env-driven)', () => {
   let getPaymentProvider: typeof import('@/payments/providerFactory').getPaymentProvider;
   let resetPaymentProvider: typeof import('@/payments/providerFactory').resetPaymentProvider;
 
@@ -74,9 +82,6 @@ describe('providerFactory', () => {
     process.env.NODE_ENV = 'production';
     delete process.env.PAYMENT_PROVIDER;
     try {
-      // In production with no PAYMENT_PROVIDER=mock override, it should try to load
-      // StripePaymentProvider. We don't have Stripe keys, so this may fail during
-      // client init, but we can verify the factory attempts to load the stripe provider.
       const provider = getPaymentProvider(PaymentProvider.STRIPE);
       expect(provider.constructor.name).toBe('StripePaymentProvider');
     } catch {
@@ -101,5 +106,76 @@ describe('providerFactory', () => {
     expect(typeof provider.getIssuingBalance).toBe('function');
     expect(provider.metadata).toBeDefined();
     expect(provider.metadata.id).toBe(PaymentProvider.STRIPE);
+  });
+});
+
+describe('providerFactory — getProviderForUser / getProviderForIntent', () => {
+  // No resetModules here — need a stable prisma mock across tests
+  const { getProviderForUser, getProviderForIntent } = require('@/payments/providerFactory');
+  const { prisma } = require('@/db/client');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('getProviderForUser', () => {
+    it('resolves the user and returns the provider matching user.paymentProvider', async () => {
+      (prisma.user.findUniqueOrThrow as jest.Mock).mockResolvedValue({
+        paymentProvider: PaymentProvider.STRIPE,
+      });
+
+      const provider = await getProviderForUser('user-1');
+
+      expect(prisma.user.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        select: { paymentProvider: true },
+      });
+      expect(provider.metadata.id).toBe(PaymentProvider.STRIPE);
+    });
+
+    it('translates Prisma P2025 into IntentNotFoundError', async () => {
+      (prisma.user.findUniqueOrThrow as jest.Mock).mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('no record', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(getProviderForUser('missing-user')).rejects.toThrow(IntentNotFoundError);
+    });
+
+    it('rethrows non-P2025 errors unchanged', async () => {
+      const dbErr = new Error('connection refused');
+      (prisma.user.findUniqueOrThrow as jest.Mock).mockRejectedValue(dbErr);
+
+      await expect(getProviderForUser('user-1')).rejects.toBe(dbErr);
+    });
+  });
+
+  describe('getProviderForIntent', () => {
+    it('resolves the intent and returns the provider matching the owning user', async () => {
+      (prisma.purchaseIntent.findUniqueOrThrow as jest.Mock).mockResolvedValue({
+        user: { paymentProvider: PaymentProvider.STRIPE },
+      });
+
+      const provider = await getProviderForIntent('intent-1');
+
+      expect(prisma.purchaseIntent.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 'intent-1' },
+        select: { user: { select: { paymentProvider: true } } },
+      });
+      expect(provider.metadata.id).toBe(PaymentProvider.STRIPE);
+    });
+
+    it('translates Prisma P2025 into IntentNotFoundError', async () => {
+      (prisma.purchaseIntent.findUniqueOrThrow as jest.Mock).mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('no record', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(getProviderForIntent('missing-intent')).rejects.toThrow(IntentNotFoundError);
+    });
   });
 });

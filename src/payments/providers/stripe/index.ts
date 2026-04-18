@@ -12,11 +12,7 @@ import { handleStripeEvent } from './webhookHandler';
 
 const METADATA: ProviderMetadata = {
   id: PaymentProvider.STRIPE,
-  displayName: 'Stripe Issuing',
   currency: 'eur',
-  authorizationModel: 'per_transaction',
-  autoCancelAfterUse: false,
-  supportsFreeze: true,
 };
 
 export class StripePaymentProvider implements IPaymentProvider {

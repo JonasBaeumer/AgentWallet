@@ -62,6 +62,7 @@ jest.mock('@/ledger/potService', () => ({
 
 jest.mock('@/payments', () => {
   const mockProvider = {
+    metadata: { id: 'STRIPE', currency: 'eur' },
     issueCard: jest.fn().mockResolvedValue({
       id: 'vc-1',
       intentId: 'intent-1',
@@ -78,6 +79,7 @@ jest.mock('@/payments', () => {
     freezeCard: jest.fn().mockResolvedValue(undefined),
     cancelCard: jest.fn().mockResolvedValue(undefined),
     handleWebhookEvent: jest.fn().mockResolvedValue(undefined),
+    getIssuingBalance: jest.fn().mockResolvedValue({ available: 999_999_99, currency: 'eur' }),
   };
   return {
     getPaymentProvider: () => mockProvider,
@@ -127,6 +129,7 @@ const dbUsers: Record<string, any> = {
     mccAllowlist: [],
     apiKeyHash: null,
     apiKeyPrefix: TEST_KEY_PREFIX,
+    paymentProvider: 'STRIPE',
   },
 };
 const dbIntents: Record<string, any> = {};

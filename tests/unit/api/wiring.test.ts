@@ -96,6 +96,7 @@ const mockGetIssuingBalance = jest
   .fn()
   .mockResolvedValue({ available: 999_999_99, currency: 'eur' });
 const mockPaymentProvider = {
+  metadata: { id: 'STRIPE', currency: 'eur' },
   issueCard: mockIssueVirtualCard,
   revealCard: mockRevealCard,
   freezeCard: jest.fn().mockResolvedValue(undefined),
@@ -136,6 +137,7 @@ const dbUsers: Record<string, any> = {
     mccAllowlist: [],
     apiKeyHash: null,
     apiKeyPrefix: TEST_KEY_PREFIX,
+    paymentProvider: 'STRIPE',
   },
 };
 const dbIntents: Record<string, any> = {};
@@ -301,7 +303,7 @@ describe('POST /v1/intents wiring', () => {
       userId: 'user-1',
       query: 'Sony headphones',
       maxBudget: 30000,
-      currency: 'gbp',
+      currency: 'eur',
     });
     expect(payload.intentId).toBe(intentId);
   });

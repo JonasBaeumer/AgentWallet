@@ -4,6 +4,8 @@ import { PaymentProvider } from '@/contracts';
 
 export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
   // Raw body is preserved for this path by app's content-type parser (required for Stripe signature verification).
+  // The route hardcodes PaymentProvider.STRIPE because each provider has its own webhook path
+  // with provider-specific signature schemes (Privacy.com will add /v1/webhooks/privacy in #106).
   fastify.post(
     '/v1/webhooks/stripe',
     {
