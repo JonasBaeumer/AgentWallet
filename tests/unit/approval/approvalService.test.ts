@@ -16,14 +16,27 @@ beforeEach(() => jest.clearAllMocks());
 
 describe('recordDecision', () => {
   it('throws InvalidApprovalStateError when not in AWAITING_APPROVAL', async () => {
-    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ id: 'i-1', status: IntentStatus.RECEIVED });
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
+      id: 'i-1',
+      status: IntentStatus.RECEIVED,
+    });
 
-    await expect(recordDecision('i-1', ApprovalDecisionType.APPROVED, 'user-1')).rejects.toThrow(InvalidApprovalStateError);
+    await expect(recordDecision('i-1', ApprovalDecisionType.APPROVED, 'user-1')).rejects.toThrow(
+      InvalidApprovalStateError,
+    );
   });
 
   it('is idempotent — second call returns first result', async () => {
-    const existingDecision = { id: 'ad-1', intentId: 'i-1', decision: ApprovalDecisionType.APPROVED, actorId: 'user-1' };
-    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ id: 'i-1', status: IntentStatus.AWAITING_APPROVAL });
+    const existingDecision = {
+      id: 'ad-1',
+      intentId: 'i-1',
+      decision: ApprovalDecisionType.APPROVED,
+      actorId: 'user-1',
+    };
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
+      id: 'i-1',
+      status: IntentStatus.AWAITING_APPROVAL,
+    });
     (mockPrisma.approvalDecision.findUnique as jest.Mock).mockResolvedValue(existingDecision);
 
     const result = await recordDecision('i-1', ApprovalDecisionType.APPROVED, 'user-1');
@@ -32,9 +45,15 @@ describe('recordDecision', () => {
   });
 
   it('stores APPROVED decision and transitions intent', async () => {
-    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ id: 'i-1', status: IntentStatus.AWAITING_APPROVAL });
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
+      id: 'i-1',
+      status: IntentStatus.AWAITING_APPROVAL,
+    });
     (mockPrisma.approvalDecision.findUnique as jest.Mock).mockResolvedValue(null);
-    (mockPrisma.approvalDecision.create as jest.Mock).mockResolvedValue({ id: 'ad-1', decision: ApprovalDecisionType.APPROVED });
+    (mockPrisma.approvalDecision.create as jest.Mock).mockResolvedValue({
+      id: 'ad-1',
+      decision: ApprovalDecisionType.APPROVED,
+    });
     (mockPrisma.purchaseIntent.update as jest.Mock).mockResolvedValue({});
     (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
 
@@ -47,9 +66,15 @@ describe('recordDecision', () => {
   });
 
   it('stores DENIED decision and transitions intent to DENIED', async () => {
-    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({ id: 'i-1', status: IntentStatus.AWAITING_APPROVAL });
+    (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
+      id: 'i-1',
+      status: IntentStatus.AWAITING_APPROVAL,
+    });
     (mockPrisma.approvalDecision.findUnique as jest.Mock).mockResolvedValue(null);
-    (mockPrisma.approvalDecision.create as jest.Mock).mockResolvedValue({ id: 'ad-1', decision: ApprovalDecisionType.DENIED });
+    (mockPrisma.approvalDecision.create as jest.Mock).mockResolvedValue({
+      id: 'ad-1',
+      decision: ApprovalDecisionType.DENIED,
+    });
     (mockPrisma.purchaseIntent.update as jest.Mock).mockResolvedValue({});
     (mockPrisma.auditEvent.create as jest.Mock).mockResolvedValue({});
 

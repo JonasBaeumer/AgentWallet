@@ -31,7 +31,10 @@ export async function startSearching(intentId: string): Promise<TransitionResult
   return transitionIntent(intentId, IntentEvent.INTENT_CREATED);
 }
 
-export async function receiveQuote(intentId: string, quotePayload: Record<string, unknown>): Promise<TransitionResult> {
+export async function receiveQuote(
+  intentId: string,
+  quotePayload: Record<string, unknown>,
+): Promise<TransitionResult> {
   // Persist quote data in metadata so the approval route can read merchant/price info
   await prisma.purchaseIntent.update({
     where: { id: intentId },
@@ -48,7 +51,11 @@ export async function approveIntent(intentId: string, actorId: string): Promise<
   return transitionIntent(intentId, IntentEvent.USER_APPROVED, {}, actorId);
 }
 
-export async function denyIntent(intentId: string, actorId: string, reason?: string): Promise<TransitionResult> {
+export async function denyIntent(
+  intentId: string,
+  actorId: string,
+  reason?: string,
+): Promise<TransitionResult> {
   return transitionIntent(intentId, IntentEvent.USER_DENIED, { reason }, actorId);
 }
 
@@ -60,7 +67,10 @@ export async function startCheckout(intentId: string): Promise<TransitionResult>
   return transitionIntent(intentId, IntentEvent.CHECKOUT_STARTED, {}, 'worker');
 }
 
-export async function completeCheckout(intentId: string, actualAmount: number): Promise<TransitionResult> {
+export async function completeCheckout(
+  intentId: string,
+  actualAmount: number,
+): Promise<TransitionResult> {
   const result = await transitionIntent(intentId, IntentEvent.CHECKOUT_SUCCEEDED, { actualAmount });
 
   // Apply cancel policy — fire-and-forget so policy errors never block the checkout response
@@ -74,7 +84,10 @@ export async function completeCheckout(intentId: string, actualAmount: number): 
 async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
   const intent = await prisma.purchaseIntent.findUnique({
     where: { id: intentId },
-    include: { user: { select: { cancelPolicy: true, cardTtlMinutes: true, telegramChatId: true } }, virtualCard: true },
+    include: {
+      user: { select: { cancelPolicy: true, cardTtlMinutes: true, telegramChatId: true } },
+      virtualCard: true,
+    },
   });
   if (!intent?.user) return;
 
@@ -84,27 +97,37 @@ async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
     // Cancellation is handled by the issuing_transaction.created Stripe webhook.
     // Fallback for stub/test flows where no real Stripe transaction fires:
     if (!intent.virtualCard) {
-      await getPaymentProvider().cancelCard(intentId).catch((err) => {
-        log.error({ intentId, err }, 'ON_TRANSACTION stub fallback cancel failed');
-      });
+      await getPaymentProvider()
+        .cancelCard(intentId)
+        .catch((err) => {
+          log.error({ intentId, err }, 'ON_TRANSACTION stub fallback cancel failed');
+        });
     }
   } else if (cancelPolicy === 'IMMEDIATE') {
-    await getPaymentProvider().cancelCard(intentId).catch((err) => {
-      log.error({ intentId, err }, 'IMMEDIATE card cancel failed');
-    });
+    await getPaymentProvider()
+      .cancelCard(intentId)
+      .catch((err) => {
+        log.error({ intentId, err }, 'IMMEDIATE card cancel failed');
+      });
   } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes) {
     await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
   } else if (cancelPolicy === 'MANUAL') {
-    await getPaymentProvider().freezeCard(intentId).catch((err) => {
-      log.error({ intentId, err }, 'MANUAL card freeze failed');
-    });
+    await getPaymentProvider()
+      .freezeCard(intentId)
+      .catch((err) => {
+        log.error({ intentId, err }, 'MANUAL card freeze failed');
+      });
     if (telegramChatId) {
       await notifyManualCardPending(telegramChatId, intentId, intent.subject ?? intent.query);
     }
   }
 }
 
-async function notifyManualCardPending(telegramChatId: string, intentId: string, label: string): Promise<void> {
+async function notifyManualCardPending(
+  telegramChatId: string,
+  intentId: string,
+  label: string,
+): Promise<void> {
   try {
     const bot = getTelegramBot();
     const keyboard = new InlineKeyboard().text('Cancel Card Now', `menu_card_cancel:${intentId}`);
@@ -118,16 +141,21 @@ async function notifyManualCardPending(telegramChatId: string, intentId: string,
   }
 }
 
-export async function failCheckout(intentId: string, errorMessage: string): Promise<TransitionResult> {
+export async function failCheckout(
+  intentId: string,
+  errorMessage: string,
+): Promise<TransitionResult> {
   return transitionIntent(intentId, IntentEvent.CHECKOUT_FAILED, { errorMessage });
 }
 
 async function cleanupExpiredIntent(intentId: string): Promise<void> {
   const card = await prisma.virtualCard.findUnique({ where: { intentId } });
   if (card) {
-    await getPaymentProvider().cancelCard(intentId).catch((err) => {
-      log.error({ intentId, err }, 'Failed to cancel card during expiry cleanup');
-    });
+    await getPaymentProvider()
+      .cancelCard(intentId)
+      .catch((err) => {
+        log.error({ intentId, err }, 'Failed to cancel card during expiry cleanup');
+      });
   }
 
   const pot = await prisma.pot.findFirst({ where: { intentId, status: 'ACTIVE' } });

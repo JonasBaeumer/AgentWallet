@@ -2,7 +2,12 @@ import Stripe from 'stripe';
 import { getStripeClient } from './stripeClient';
 import { buildSpendingControls } from './spendingControls';
 import { prisma } from '@/db/client';
-import { VirtualCardData, CardReveal, CardAlreadyRevealedError, IntentNotFoundError } from '@/contracts';
+import {
+  VirtualCardData,
+  CardReveal,
+  CardAlreadyRevealedError,
+  IntentNotFoundError,
+} from '@/contracts';
 import { logger } from '@/config/logger';
 
 const log = logger.child({ module: 'payments/stripe/cardService' });
@@ -119,7 +124,10 @@ export async function revealCard(intentId: string): Promise<CardReveal> {
     });
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
-      log.error({ intentId, type: err.type, code: err.code, err }, 'Failed to retrieve card details');
+      log.error(
+        { intentId, type: err.type, code: err.code, err },
+        'Failed to retrieve card details',
+      );
     }
     throw err;
   }

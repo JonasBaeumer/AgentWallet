@@ -29,19 +29,27 @@ describe('getNextStatus - legal transitions', () => {
 
 describe('getNextStatus - illegal transitions', () => {
   it('throws IllegalTransitionError for DONE + USER_APPROVED', () => {
-    expect(() => getNextStatus(IntentStatus.DONE, IntentEvent.USER_APPROVED)).toThrow(IllegalTransitionError);
+    expect(() => getNextStatus(IntentStatus.DONE, IntentEvent.USER_APPROVED)).toThrow(
+      IllegalTransitionError,
+    );
   });
 
   it('throws IllegalTransitionError for RECEIVED + CHECKOUT_SUCCEEDED', () => {
-    expect(() => getNextStatus(IntentStatus.RECEIVED, IntentEvent.CHECKOUT_SUCCEEDED)).toThrow(IllegalTransitionError);
+    expect(() => getNextStatus(IntentStatus.RECEIVED, IntentEvent.CHECKOUT_SUCCEEDED)).toThrow(
+      IllegalTransitionError,
+    );
   });
 
   it('throws IllegalTransitionError for DENIED + CARD_ISSUED', () => {
-    expect(() => getNextStatus(IntentStatus.DENIED, IntentEvent.CARD_ISSUED)).toThrow(IllegalTransitionError);
+    expect(() => getNextStatus(IntentStatus.DENIED, IntentEvent.CARD_ISSUED)).toThrow(
+      IllegalTransitionError,
+    );
   });
 
   it('throws IllegalTransitionError for EXPIRED + USER_APPROVED', () => {
-    expect(() => getNextStatus(IntentStatus.EXPIRED, IntentEvent.USER_APPROVED)).toThrow(IllegalTransitionError);
+    expect(() => getNextStatus(IntentStatus.EXPIRED, IntentEvent.USER_APPROVED)).toThrow(
+      IllegalTransitionError,
+    );
   });
 });
 

@@ -87,17 +87,13 @@ describe('valid key with Issuing enabled', () => {
 
   it('logs the Issuing balance', async () => {
     await validateStripeSetup();
-    expect(mockInfo).toHaveBeenCalledWith(
-      expect.stringContaining('50000 eur'),
-    );
+    expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('50000 eur'));
   });
 
   it('logs live mode for live keys', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_live_real_key';
     await validateStripeSetup();
-    expect(mockInfo).toHaveBeenCalledWith(
-      expect.stringContaining('mode: live'),
-    );
+    expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('mode: live'));
   });
 
   it('does not warn', async () => {
@@ -108,9 +104,7 @@ describe('valid key with Issuing enabled', () => {
   it('handles balance retrieval failure gracefully', async () => {
     mockBalanceRetrieve.mockRejectedValue(new Error('network'));
     await expect(validateStripeSetup()).resolves.toBeUndefined();
-    expect(mockInfo).toHaveBeenCalledWith(
-      expect.stringContaining('Stripe Issuing is enabled'),
-    );
+    expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('Stripe Issuing is enabled'));
   });
 });
 

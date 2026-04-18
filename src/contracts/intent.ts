@@ -1,4 +1,7 @@
-import { IntentStatus as PrismaIntentStatus, CardCancelPolicy as PrismaCardCancelPolicy } from '@prisma/client';
+import {
+  IntentStatus as PrismaIntentStatus,
+  CardCancelPolicy as PrismaCardCancelPolicy,
+} from '@prisma/client';
 
 export { PrismaIntentStatus as IntentStatus };
 export { PrismaCardCancelPolicy as CardCancelPolicy };

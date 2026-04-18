@@ -16,7 +16,10 @@ interface UserForPolicy {
   mccAllowlist: string[];
 }
 
-export async function evaluateIntent(intent: IntentForPolicy, user: UserForPolicy): Promise<PolicyResult> {
+export async function evaluateIntent(
+  intent: IntentForPolicy,
+  user: UserForPolicy,
+): Promise<PolicyResult> {
   const reasons: string[] = [];
 
   // Rule 1: amount <= user.maxBudgetPerIntent
@@ -30,8 +33,8 @@ export async function evaluateIntent(intent: IntentForPolicy, user: UserForPolic
     try {
       const url = new URL(merchantUrl);
       const domain = url.hostname;
-      const allowed = user.merchantAllowlist.some((allowedDomain) =>
-        domain === allowedDomain || domain.endsWith(`.${allowedDomain}`)
+      const allowed = user.merchantAllowlist.some(
+        (allowedDomain) => domain === allowedDomain || domain.endsWith(`.${allowedDomain}`),
       );
       if (!allowed) {
         reasons.push(`Merchant domain ${domain} not in allowlist`);
@@ -63,14 +66,16 @@ export async function evaluateIntent(intent: IntentForPolicy, user: UserForPolic
   }
 
   // Log evaluation to audit
-  await prisma.auditEvent.create({
-    data: {
-      intentId: intent.id,
-      actor: 'policy-engine',
-      event: 'POLICY_EVALUATED',
-      payload: { allowed: reasons.length === 0, reasons } as any,
-    },
-  }).catch(() => {}); // non-blocking
+  await prisma.auditEvent
+    .create({
+      data: {
+        intentId: intent.id,
+        actor: 'policy-engine',
+        event: 'POLICY_EVALUATED',
+        payload: { allowed: reasons.length === 0, reasons } as any,
+      },
+    })
+    .catch(() => {}); // non-blocking
 
   if (reasons.length > 0) {
     return { allowed: false, reason: reasons.join('; ') };

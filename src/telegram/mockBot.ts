@@ -36,7 +36,10 @@ const mockApi = {
     const messageId = _messageIdCounter++;
     return Promise.resolve({
       message_id: messageId,
-      chat: { id: typeof chatId === 'string' ? parseInt(chatId, 10) || 0 : chatId, type: 'private' as const },
+      chat: {
+        id: typeof chatId === 'string' ? parseInt(chatId, 10) || 0 : chatId,
+        type: 'private' as const,
+      },
       text,
       date: Math.floor(Date.now() / 1000),
     });
@@ -47,16 +50,14 @@ const mockApi = {
     return Promise.resolve(true);
   },
 
-  editMessageText(
-    chatId: string | number,
-    messageId: number,
-    text: string,
-    opts?: unknown,
-  ) {
+  editMessageText(chatId: string | number, messageId: number, text: string, opts?: unknown) {
     record('editMessageText', [chatId, messageId, text, opts]);
     return Promise.resolve({
       message_id: messageId,
-      chat: { id: typeof chatId === 'string' ? parseInt(chatId, 10) || 0 : chatId, type: 'private' as const },
+      chat: {
+        id: typeof chatId === 'string' ? parseInt(chatId, 10) || 0 : chatId,
+        type: 'private' as const,
+      },
       text,
       date: Math.floor(Date.now() / 1000),
     });

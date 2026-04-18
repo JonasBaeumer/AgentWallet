@@ -37,9 +37,7 @@ jest.mock('@/queue/producers', () => ({
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
 const hasStripeKey =
-  !!STRIPE_KEY &&
-  STRIPE_KEY.startsWith('sk_test_') &&
-  !STRIPE_KEY.includes('placeholder');
+  !!STRIPE_KEY && STRIPE_KEY.startsWith('sk_test_') && !STRIPE_KEY.includes('placeholder');
 const testSuite = hasStripeKey ? describe : describe.skip;
 
 const RUN_ID = Date.now();
@@ -50,10 +48,20 @@ const createdUserIds: string[] = [];
 afterAll(async () => {
   const errors: unknown[] = [];
   for (const intentId of createdIntentIds) {
-    for (const model of ['ledgerEntry', 'pot', 'virtualCard', 'auditEvent', 'approvalDecision'] as const) {
-      await (prisma[model] as any).deleteMany({ where: { intentId } }).catch((e: unknown) => errors.push(e));
+    for (const model of [
+      'ledgerEntry',
+      'pot',
+      'virtualCard',
+      'auditEvent',
+      'approvalDecision',
+    ] as const) {
+      await (prisma[model] as any)
+        .deleteMany({ where: { intentId } })
+        .catch((e: unknown) => errors.push(e));
     }
-    await prisma.purchaseIntent.deleteMany({ where: { id: intentId } }).catch((e: unknown) => errors.push(e));
+    await prisma.purchaseIntent
+      .deleteMany({ where: { id: intentId } })
+      .catch((e: unknown) => errors.push(e));
   }
   for (const userId of createdUserIds) {
     await prisma.user.deleteMany({ where: { id: userId } }).catch((e: unknown) => errors.push(e));
@@ -66,7 +74,6 @@ afterAll(async () => {
 });
 
 testSuite('Card lifecycle integration', () => {
-
   // ─── Group 1: Successful purchase — full lifecycle ────────────────────────
 
   describe('Successful purchase — full lifecycle', () => {
@@ -313,22 +320,30 @@ testSuite('Card lifecycle integration', () => {
       await cancelCard(cancelIntentId);
       await expect(cancelCard(cancelIntentId)).resolves.toBeUndefined();
 
-      const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId: cancelIntentId } });
+      const card = await prisma.virtualCard.findUniqueOrThrow({
+        where: { intentId: cancelIntentId },
+      });
       expect(card.cancelledAt).not.toBeNull();
     });
 
     it('double returnIntent is a no-op — balance unchanged', async () => {
       await returnIntent(returnIntentId);
-      const potAfterFirst = await prisma.pot.findUniqueOrThrow({ where: { intentId: returnIntentId } });
+      const potAfterFirst = await prisma.pot.findUniqueOrThrow({
+        where: { intentId: returnIntentId },
+      });
       expect(potAfterFirst.status).toBe(PotStatus.RETURNED);
 
-      const balanceAfterFirst = (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).mainBalance;
+      const balanceAfterFirst = (await prisma.user.findUniqueOrThrow({ where: { id: userId } }))
+        .mainBalance;
 
       await expect(returnIntent(returnIntentId)).resolves.toBeUndefined();
-      const potAfterSecond = await prisma.pot.findUniqueOrThrow({ where: { intentId: returnIntentId } });
+      const potAfterSecond = await prisma.pot.findUniqueOrThrow({
+        where: { intentId: returnIntentId },
+      });
       expect(potAfterSecond.status).toBe(PotStatus.RETURNED);
 
-      const balanceAfterSecond = (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).mainBalance;
+      const balanceAfterSecond = (await prisma.user.findUniqueOrThrow({ where: { id: userId } }))
+        .mainBalance;
       expect(balanceAfterSecond).toBe(balanceAfterFirst);
     });
   });

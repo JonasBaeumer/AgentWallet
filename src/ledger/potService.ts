@@ -1,10 +1,20 @@
 import { prisma } from '@/db/client';
-import { PotStatus, LedgerEntryType, PotData, InsufficientFundsError, IntentNotFoundError } from '@/contracts';
+import {
+  PotStatus,
+  LedgerEntryType,
+  PotData,
+  InsufficientFundsError,
+  IntentNotFoundError,
+} from '@/contracts';
 import { logger } from '@/config/logger';
 
 const log = logger.child({ module: 'ledger/potService' });
 
-export async function reserveForIntent(userId: string, intentId: string, amount: number): Promise<PotData> {
+export async function reserveForIntent(
+  userId: string,
+  intentId: string,
+  amount: number,
+): Promise<PotData> {
   log.info({ intentId, userId, amount }, 'Reserving funds');
   return await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: userId } });
@@ -16,7 +26,13 @@ export async function reserveForIntent(userId: string, intentId: string, amount:
 
     // Create pot
     const pot = await tx.pot.create({
-      data: { userId, intentId, reservedAmount: amount, settledAmount: 0, status: PotStatus.ACTIVE },
+      data: {
+        userId,
+        intentId,
+        reservedAmount: amount,
+        settledAmount: 0,
+        status: PotStatus.ACTIVE,
+      },
     });
 
     // Record ledger entry
@@ -44,12 +60,21 @@ export async function settleIntent(intentId: string, actualAmount: number): Prom
 
     // Return surplus to mainBalance
     if (surplus > 0) {
-      await tx.user.update({ where: { id: pot.userId }, data: { mainBalance: { increment: surplus } } });
+      await tx.user.update({
+        where: { id: pot.userId },
+        data: { mainBalance: { increment: surplus } },
+      });
     }
 
     // Record ledger entry
     await tx.ledgerEntry.create({
-      data: { userId: pot.userId, intentId, type: LedgerEntryType.SETTLE, amount: actualAmount, currency: 'gbp' },
+      data: {
+        userId: pot.userId,
+        intentId,
+        type: LedgerEntryType.SETTLE,
+        amount: actualAmount,
+        currency: 'gbp',
+      },
     });
   });
 }
@@ -63,14 +88,23 @@ export async function returnIntent(intentId: string): Promise<void> {
     if (pot.status !== PotStatus.ACTIVE) return; // Already settled/returned
 
     // Return full reserved amount
-    await tx.user.update({ where: { id: pot.userId }, data: { mainBalance: { increment: pot.reservedAmount } } });
+    await tx.user.update({
+      where: { id: pot.userId },
+      data: { mainBalance: { increment: pot.reservedAmount } },
+    });
 
     // Update pot
     await tx.pot.update({ where: { intentId }, data: { status: PotStatus.RETURNED } });
 
     // Record ledger entry
     await tx.ledgerEntry.create({
-      data: { userId: pot.userId, intentId, type: LedgerEntryType.RETURN, amount: pot.reservedAmount, currency: 'gbp' },
+      data: {
+        userId: pot.userId,
+        intentId,
+        type: LedgerEntryType.RETURN,
+        amount: pot.reservedAmount,
+        currency: 'gbp',
+      },
     });
   });
 }
