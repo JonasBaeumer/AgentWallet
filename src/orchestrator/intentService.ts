@@ -101,6 +101,17 @@ async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
   const { cancelPolicy, cardTtlMinutes, telegramChatId, paymentProvider } = intent.user;
   const provider = getPaymentProvider(paymentProvider);
 
+  // Providers that auto-close their cards after first use (e.g. Privacy.com
+  // SINGLE_USE) make cancelCard redundant. Explicit cancel/freeze calls still
+  // succeed but are no-ops at the provider level — skip them to avoid log noise.
+  if (provider.metadata.autoCancelAfterUse) {
+    log.info(
+      { intentId, provider: paymentProvider },
+      'Skipping post-checkout cancel — provider auto-closes cards after use',
+    );
+    return;
+  }
+
   if (cancelPolicy === 'ON_TRANSACTION') {
     // Cancellation is handled by the issuing_transaction.created Stripe webhook.
     // Fallback for stub/test flows where no real Stripe transaction fires:
@@ -116,6 +127,14 @@ async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
   } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes) {
     await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
   } else if (cancelPolicy === 'MANUAL') {
+    // MANUAL needs freezeCard — skip for providers that don't support it.
+    if (!provider.metadata.supportsFreeze) {
+      log.warn(
+        { intentId, provider: paymentProvider },
+        'MANUAL cancel policy selected but provider does not support freeze — leaving card as-is',
+      );
+      return;
+    }
     await provider.freezeCard(intentId).catch((err) => {
       log.error({ intentId, err }, 'MANUAL card freeze failed');
     });

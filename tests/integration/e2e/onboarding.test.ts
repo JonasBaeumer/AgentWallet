@@ -150,7 +150,33 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     expect(confirmRes.statusCode).toBe(200);
     await new Promise((r) => setTimeout(r, 100));
 
-    // Bot should have edited the message asking for email
+    // After confirm, the bot edits the message to show the provider-choice keyboard.
+    expect(mockEditMessageText).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.stringContaining('payment provider'),
+      expect.any(Object),
+    );
+
+    // Step 3c: User taps "Stripe (EUR)" — callback query with signup_provider:STRIPE
+    const providerRes = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/telegram',
+      headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
+      payload: {
+        update_id: 10016,
+        callback_query: {
+          id: 'cb-provider-1',
+          data: 'signup_provider:STRIPE',
+          from: { id: chatId },
+          message: { message_id: 1, chat: { id: chatId } },
+        },
+      },
+    });
+    expect(providerRes.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // After provider choice, bot should ask for the email
     expect(mockEditMessageText).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),

@@ -119,7 +119,21 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
     return;
   }
 
+  if (session.step === 'awaiting_provider') {
+    await bot.api.sendMessage(chatId, 'Please pick a payment provider using the buttons above.');
+    return;
+  }
+
   // step === 'awaiting_email'
+  if (!session.paymentProvider) {
+    // Defensive: email step reached without a provider choice. Reset.
+    await clearSignupSession(chatId);
+    await bot.api.sendMessage(
+      chatId,
+      '⚠️ Session is missing a provider choice. Please start again with /start <code>.',
+    );
+    return;
+  }
   const email = text.toLowerCase();
 
   if (!isValidEmail(email)) {
@@ -140,15 +154,18 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
         });
       }
 
+      // 1_000_000 smallest units = 10,000 of the provider's currency
+      // (10,000 EUR for Stripe; 10,000 USD for Privacy.com).
       const user = await tx.user.create({
         data: {
           email,
           telegramChatId: chatId.toString(),
           agentId: session.agentId,
-          mainBalance: 1_000_000, // 10 000 EUR in cents
+          mainBalance: 1_000_000,
           maxBudgetPerIntent: 50000,
           apiKeyHash,
           apiKeyPrefix: rawKey.slice(0, 16),
+          paymentProvider: session.paymentProvider,
         },
       });
 

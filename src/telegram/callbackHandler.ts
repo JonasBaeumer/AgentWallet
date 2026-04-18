@@ -1,4 +1,5 @@
 import type { Update } from 'grammy/types';
+import { InlineKeyboard } from 'grammy';
 import { prisma } from '@/db/client';
 import { ApprovalDecisionType, IntentStatus, InsufficientIssuingBalanceError } from '@/contracts';
 import { recordDecision } from '@/approval/approvalService';
@@ -67,13 +68,53 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
       return;
     }
 
-    // link_confirm: advance session to awaiting_email
-    await setSignupSession(fromId, { ...session, step: 'awaiting_email' });
+    // link_confirm: advance session to provider-choice step
+    await setSignupSession(fromId, { ...session, step: 'awaiting_provider' });
+    const providerKeyboard = new InlineKeyboard()
+      .text('Stripe (EUR)', 'signup_provider:STRIPE')
+      .text('Privacy.com (USD)', 'signup_provider:PRIVACY_COM');
     await editMessage(
       bot,
       chatId,
       messageId,
-      `✅ Confirmed! What email address should we use for your account?`,
+      `✅ Confirmed!\n\n` +
+        `<b>Choose a payment provider:</b>\n\n` +
+        `<b>Stripe (EUR)</b> — per-transaction approval. The backend approves or declines every charge in real time, so the card can be used repeatedly within your budget and any mismatched merchant or category is stopped at authorisation.\n\n` +
+        `<b>Privacy.com (USD)</b> — "fire and forget". The card is issued as single-use with a hard spend cap, and closes itself after one transaction. There is no per-transaction approval step, so all limits are baked into the card at issuance.\n\n` +
+        `<i>Locked at signup — see issue #128 to allow switching later.</i>`,
+      providerKeyboard,
+    );
+    return;
+  }
+
+  // ── Provider-choice callback ──────────────────────────────────────────────────
+  if (action === 'signup_provider') {
+    const session = await getSignupSession(fromId);
+    if (!session || session.step !== 'awaiting_provider') {
+      await editMessage(
+        bot,
+        chatId,
+        messageId,
+        '⚠️ Session expired or not found. Please start again with /start <code>.',
+      );
+      return;
+    }
+
+    const chosen = payload as 'STRIPE' | 'PRIVACY_COM';
+    if (chosen !== 'STRIPE' && chosen !== 'PRIVACY_COM') return;
+
+    await setSignupSession(fromId, {
+      ...session,
+      step: 'awaiting_email',
+      paymentProvider: chosen,
+    });
+    const currency = chosen === 'STRIPE' ? 'EUR' : 'USD';
+    await editMessage(
+      bot,
+      chatId,
+      messageId,
+      `✅ Selected <b>${chosen === 'STRIPE' ? 'Stripe' : 'Privacy.com'} (${currency})</b>.\n\n` +
+        `What email address should we use for your account?`,
     );
     return;
   }
@@ -194,12 +235,13 @@ async function editMessage(
   chatId: number | string | undefined,
   messageId: number | undefined,
   text: string,
+  keyboard?: InlineKeyboard,
 ): Promise<void> {
   if (!chatId || !messageId) return;
   await bot.api
     .editMessageText(chatId, messageId, text, {
       parse_mode: 'HTML',
-      reply_markup: undefined,
+      reply_markup: keyboard,
     })
     .catch(() => {});
 }
