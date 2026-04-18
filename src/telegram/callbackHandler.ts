@@ -122,14 +122,15 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
   try {
     if (action === 'approve') {
       const metadata = intent.metadata as Record<string, unknown>;
+      const provider = getPaymentProvider(intent.user.paymentProvider);
 
-      // Check Stripe Issuing balance BEFORE persisting the decision
-      const issuingBalance = await getPaymentProvider().getIssuingBalance(intent.currency);
+      // Check issuing balance BEFORE persisting the decision
+      const issuingBalance = await provider.getIssuingBalance();
       if (issuingBalance.available < intent.maxBudget) {
         throw new InsufficientIssuingBalanceError(
           issuingBalance.available,
           intent.maxBudget,
-          intent.currency,
+          issuingBalance.currency,
         );
       }
 
@@ -138,7 +139,7 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
 
       let card;
       try {
-        card = await getPaymentProvider().issueCard(intentId, intent.maxBudget, intent.currency, {
+        card = await provider.issueCard(intentId, intent.maxBudget, {
           mccAllowlist: intent.user.mccAllowlist,
         });
       } catch (cardErr) {
@@ -155,7 +156,7 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
         merchantUrl: (metadata.merchantUrl as string) ?? '',
         price: (metadata.price as number) ?? intent.maxBudget,
         currency: intent.currency,
-        stripeCardId: card.stripeCardId,
+        providerCardId: card.providerCardId,
         last4: card.last4,
       });
 

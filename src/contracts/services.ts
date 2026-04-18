@@ -4,6 +4,7 @@ import { ApprovalDecisionData, ApprovalDecisionType } from './approval';
 import { PotData } from './ledger';
 import { SearchIntentJob, CheckoutIntentJob } from './jobs';
 import { AuditEventData } from './audit';
+import { ProviderMetadata } from './payment';
 
 export interface IOrchestrator {
   transitionIntent(
@@ -22,17 +23,17 @@ export interface IssuingBalance {
 }
 
 export interface IPaymentProvider {
+  readonly metadata: ProviderMetadata;
   issueCard(
     intentId: string,
     amount: number,
-    currency: string,
     options?: { mccAllowlist?: string[] },
   ): Promise<VirtualCardData>;
   revealCard(intentId: string): Promise<CardReveal>;
   freezeCard(intentId: string): Promise<void>;
   cancelCard(intentId: string): Promise<void>;
   handleWebhookEvent(rawBody: Buffer | string, signature: string): Promise<Record<string, unknown>>;
-  getIssuingBalance(currency: string): Promise<IssuingBalance>;
+  getIssuingBalance(): Promise<IssuingBalance>;
 }
 
 export interface IApprovalService {

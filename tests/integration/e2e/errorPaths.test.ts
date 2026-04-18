@@ -45,17 +45,20 @@ const mockCancelCard = jest.fn().mockResolvedValue(undefined);
 const mockIssueCard = jest.fn().mockResolvedValue({
   id: 'vc-1',
   intentId: 'i1',
-  stripeCardId: 'ic_test',
+  providerCardId: 'ic_test',
   last4: '4242',
 });
+const mockProvider = {
+  issueCard: mockIssueCard,
+  revealCard: mockRevealCard,
+  freezeCard: jest.fn().mockResolvedValue(undefined),
+  cancelCard: mockCancelCard,
+  handleWebhookEvent: jest.fn().mockResolvedValue(undefined),
+};
 jest.mock('@/payments', () => ({
-  getPaymentProvider: () => ({
-    issueCard: mockIssueCard,
-    revealCard: mockRevealCard,
-    freezeCard: jest.fn().mockResolvedValue(undefined),
-    cancelCard: mockCancelCard,
-    handleWebhookEvent: jest.fn().mockResolvedValue(undefined),
-  }),
+  getPaymentProvider: () => mockProvider,
+  getProviderForIntent: () => Promise.resolve(mockProvider),
+  getProviderForUser: () => Promise.resolve(mockProvider),
 }));
 
 const mockDb = {

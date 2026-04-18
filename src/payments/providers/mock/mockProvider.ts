@@ -1,8 +1,25 @@
-import { IPaymentProvider, IssuingBalance, VirtualCardData, CardReveal } from '@/contracts';
+import {
+  IPaymentProvider,
+  IssuingBalance,
+  VirtualCardData,
+  CardReveal,
+  ProviderMetadata,
+  PaymentProvider,
+} from '@/contracts';
 
 type CallRecord = { method: string; args: unknown[]; timestamp: number };
 
+const METADATA: ProviderMetadata = {
+  id: PaymentProvider.STRIPE,
+  displayName: 'Mock (Stripe-compatible)',
+  currency: 'eur',
+  authorizationModel: 'per_transaction',
+  autoCancelAfterUse: false,
+  supportsFreeze: true,
+};
+
 export class MockPaymentProvider implements IPaymentProvider {
+  readonly metadata = METADATA;
   private calls: CallRecord[] = [];
   private issuingBalance = 999_999_99;
 
@@ -17,18 +34,17 @@ export class MockPaymentProvider implements IPaymentProvider {
   async issueCard(
     intentId: string,
     amount: number,
-    currency: string,
     options?: { mccAllowlist?: string[] },
   ): Promise<VirtualCardData> {
     this.calls.push({
       method: 'issueCard',
-      args: [intentId, amount, currency, options],
+      args: [intentId, amount, options],
       timestamp: Date.now(),
     });
     return {
       id: `mock-card-${intentId}`,
       intentId,
-      stripeCardId: `mock_stripe_${intentId}`,
+      providerCardId: `mock_provider_${intentId}`,
       last4: '4242',
       revealedAt: null,
       frozenAt: null,
@@ -62,9 +78,9 @@ export class MockPaymentProvider implements IPaymentProvider {
     return { received: true };
   }
 
-  async getIssuingBalance(currency: string): Promise<IssuingBalance> {
-    this.calls.push({ method: 'getIssuingBalance', args: [currency], timestamp: Date.now() });
-    return { available: this.issuingBalance, currency: currency.toLowerCase() };
+  async getIssuingBalance(): Promise<IssuingBalance> {
+    this.calls.push({ method: 'getIssuingBalance', args: [], timestamp: Date.now() });
+    return { available: this.issuingBalance, currency: this.metadata.currency };
   }
 
   setIssuingBalance(amount: number): void {

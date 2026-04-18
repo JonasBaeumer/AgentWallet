@@ -12,6 +12,7 @@ import {
 import { recordDecision } from '@/approval/approvalService';
 import { reserveForIntent, returnIntent } from '@/ledger/potService';
 import { getPaymentProvider } from '@/payments';
+import type { IPaymentProvider } from '@/contracts';
 import { markCardIssued, startCheckout } from '@/orchestrator/intentService';
 import { enqueueCheckout } from '@/queue/producers';
 
@@ -73,14 +74,15 @@ export async function approvalRoutes(fastify: FastifyInstance): Promise<void> {
 
         if (decisionType === ApprovalDecisionType.APPROVED) {
           const metadata = intent.metadata as Record<string, unknown>;
+          const provider: IPaymentProvider = getPaymentProvider(intent.user.paymentProvider);
 
-          // 1. Check Stripe Issuing balance BEFORE persisting the decision
-          const issuingBalance = await getPaymentProvider().getIssuingBalance(intent.currency);
+          // 1. Check issuing balance BEFORE persisting the decision
+          const issuingBalance = await provider.getIssuingBalance();
           if (issuingBalance.available < intent.maxBudget) {
             throw new InsufficientIssuingBalanceError(
               issuingBalance.available,
               intent.maxBudget,
-              intent.currency,
+              issuingBalance.currency,
             );
           }
 
@@ -92,15 +94,10 @@ export async function approvalRoutes(fastify: FastifyInstance): Promise<void> {
 
           let card;
           try {
-            // 4. Issue restricted Stripe virtual card
-            card = await getPaymentProvider().issueCard(
-              intentId,
-              intent.maxBudget,
-              intent.currency,
-              {
-                mccAllowlist: intent.user.mccAllowlist,
-              },
-            );
+            // 4. Issue restricted virtual card
+            card = await provider.issueCard(intentId, intent.maxBudget, {
+              mccAllowlist: intent.user.mccAllowlist,
+            });
           } catch (cardErr) {
             await returnIntent(intentId).catch(() => {});
             throw cardErr;
@@ -120,7 +117,7 @@ export async function approvalRoutes(fastify: FastifyInstance): Promise<void> {
             merchantUrl: (metadata.merchantUrl as string) ?? '',
             price: (metadata.price as number) ?? intent.maxBudget,
             currency: intent.currency,
-            stripeCardId: card.stripeCardId,
+            providerCardId: card.providerCardId,
             last4: card.last4,
           });
 

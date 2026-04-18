@@ -17,6 +17,9 @@ function makeTxMock(overrides: Record<string, any> = {}) {
     user: { findUnique: jest.fn(), update: jest.fn() },
     pot: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     ledgerEntry: { create: jest.fn() },
+    purchaseIntent: {
+      findUnique: jest.fn().mockResolvedValue({ currency: 'eur' }),
+    },
     ...overrides,
   };
 }

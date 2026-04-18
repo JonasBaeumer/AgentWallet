@@ -1,6 +1,6 @@
 import { Worker, Job } from 'bullmq';
 import { getRedisConnectionConfig } from '@/config/redis';
-import { getPaymentProvider } from '@/payments';
+import { getProviderForIntent } from '@/payments';
 import { logger } from '@/config/logger';
 
 const log = logger.child({ module: 'worker/processors/cancelCardProcessor' });
@@ -16,7 +16,8 @@ export function createCancelCardWorker(): Worker {
       const { intentId } = job.data;
       log.info({ intentId }, 'Processing cancel card job');
 
-      await getPaymentProvider().cancelCard(intentId);
+      const provider = await getProviderForIntent(intentId);
+      await provider.cancelCard(intentId);
 
       log.info({ intentId }, 'Card cancelled via AFTER_TTL policy');
     },

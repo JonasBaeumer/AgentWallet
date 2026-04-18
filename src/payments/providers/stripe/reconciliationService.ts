@@ -19,9 +19,9 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
   }
 
   const stripe = getStripeClient();
-  const stripeCard = await stripe.issuing.cards.retrieve(card.stripeCardId);
+  const stripeCard = await stripe.issuing.cards.retrieve(card.providerCardId);
   const txList = await stripe.issuing.transactions.list({
-    card: card.stripeCardId,
+    card: card.providerCardId,
     type: 'capture',
   });
 

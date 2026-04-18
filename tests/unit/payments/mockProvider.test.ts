@@ -1,4 +1,5 @@
 import { MockPaymentProvider } from '@/payments/providers/mock/mockProvider';
+import { PaymentProvider } from '@/contracts';
 
 describe('MockPaymentProvider', () => {
   let provider: MockPaymentProvider;
@@ -7,14 +8,26 @@ describe('MockPaymentProvider', () => {
     provider = new MockPaymentProvider();
   });
 
+  describe('metadata', () => {
+    it('exposes provider metadata with Stripe-compatible defaults', () => {
+      expect(provider.metadata).toMatchObject({
+        id: PaymentProvider.STRIPE,
+        currency: 'eur',
+        authorizationModel: 'per_transaction',
+        autoCancelAfterUse: false,
+        supportsFreeze: true,
+      });
+    });
+  });
+
   describe('issueCard', () => {
     it('returns a VirtualCardData with mock values', async () => {
-      const result = await provider.issueCard('intent-1', 5000, 'eur');
+      const result = await provider.issueCard('intent-1', 5000);
 
       expect(result).toMatchObject({
         id: 'mock-card-intent-1',
         intentId: 'intent-1',
-        stripeCardId: 'mock_stripe_intent-1',
+        providerCardId: 'mock_provider_intent-1',
         last4: '4242',
         revealedAt: null,
         frozenAt: null,
@@ -24,12 +37,12 @@ describe('MockPaymentProvider', () => {
     });
 
     it('passes options through to call recording', async () => {
-      await provider.issueCard('intent-2', 10000, 'gbp', { mccAllowlist: ['5411'] });
+      await provider.issueCard('intent-2', 10000, { mccAllowlist: ['5411'] });
 
       const calls = provider.getCalls();
       expect(calls).toHaveLength(1);
       expect(calls[0].method).toBe('issueCard');
-      expect(calls[0].args).toEqual(['intent-2', 10000, 'gbp', { mccAllowlist: ['5411'] }]);
+      expect(calls[0].args).toEqual(['intent-2', 10000, { mccAllowlist: ['5411'] }]);
     });
   });
 
@@ -106,7 +119,7 @@ describe('MockPaymentProvider', () => {
 
   describe('call recording', () => {
     it('records calls across multiple methods in order', async () => {
-      await provider.issueCard('i1', 1000, 'eur');
+      await provider.issueCard('i1', 1000);
       await provider.revealCard('i1');
       await provider.cancelCard('i1');
 
@@ -117,7 +130,7 @@ describe('MockPaymentProvider', () => {
 
     it('includes timestamps on each call', async () => {
       const before = Date.now();
-      await provider.issueCard('i1', 1000, 'eur');
+      await provider.issueCard('i1', 1000);
       const after = Date.now();
 
       const calls = provider.getCalls();
@@ -126,7 +139,7 @@ describe('MockPaymentProvider', () => {
     });
 
     it('getCalls() returns a copy — mutations do not affect internal state', async () => {
-      await provider.issueCard('i1', 1000, 'eur');
+      await provider.issueCard('i1', 1000);
 
       const calls = provider.getCalls();
       calls.length = 0;
@@ -136,7 +149,7 @@ describe('MockPaymentProvider', () => {
 
     it('two instances have independent call logs', async () => {
       const other = new MockPaymentProvider();
-      await provider.issueCard('i1', 1000, 'eur');
+      await provider.issueCard('i1', 1000);
       await other.freezeCard('i2');
 
       expect(provider.getCalls()).toHaveLength(1);
@@ -147,31 +160,25 @@ describe('MockPaymentProvider', () => {
   });
 
   describe('getIssuingBalance', () => {
-    it('returns a high default balance', async () => {
-      const result = await provider.getIssuingBalance('gbp');
+    it('returns a high default balance in the metadata currency', async () => {
+      const result = await provider.getIssuingBalance();
 
-      expect(result).toEqual({ available: 999_999_99, currency: 'gbp' });
-    });
-
-    it('normalises currency to lowercase', async () => {
-      const result = await provider.getIssuingBalance('EUR');
-
-      expect(result.currency).toBe('eur');
+      expect(result).toEqual({ available: 999_999_99, currency: 'eur' });
     });
 
     it('records the call', async () => {
-      await provider.getIssuingBalance('usd');
+      await provider.getIssuingBalance();
 
       const calls = provider.getCalls();
       expect(calls).toHaveLength(1);
       expect(calls[0].method).toBe('getIssuingBalance');
-      expect(calls[0].args).toEqual(['usd']);
+      expect(calls[0].args).toEqual([]);
     });
 
     it('returns overridden balance after setIssuingBalance', async () => {
       provider.setIssuingBalance(500);
 
-      const result = await provider.getIssuingBalance('gbp');
+      const result = await provider.getIssuingBalance();
 
       expect(result.available).toBe(500);
     });
@@ -179,7 +186,7 @@ describe('MockPaymentProvider', () => {
     it('setIssuingBalance(0) makes balance zero', async () => {
       provider.setIssuingBalance(0);
 
-      const result = await provider.getIssuingBalance('gbp');
+      const result = await provider.getIssuingBalance();
 
       expect(result.available).toBe(0);
     });
@@ -187,7 +194,7 @@ describe('MockPaymentProvider', () => {
 
   describe('clearCalls', () => {
     it('removes all recorded calls', async () => {
-      await provider.issueCard('i1', 1000, 'eur');
+      await provider.issueCard('i1', 1000);
       await provider.revealCard('i1');
       expect(provider.getCalls()).toHaveLength(2);
 

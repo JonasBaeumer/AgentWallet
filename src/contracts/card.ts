@@ -1,7 +1,7 @@
 export interface VirtualCardData {
   id: string;
   intentId: string;
-  stripeCardId: string;
+  providerCardId: string;
   last4: string;
   revealedAt: Date | null;
   frozenAt: Date | null;

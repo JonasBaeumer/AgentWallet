@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getPaymentProvider } from '@/payments';
+import { PaymentProvider } from '@/contracts';
 
 export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
   // Raw body is preserved for this path by app's content-type parser (required for Stripe signature verification).
@@ -23,7 +24,10 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       let response: Record<string, unknown> = { received: true };
       try {
         const body = request.body as Buffer | string;
-        response = await getPaymentProvider().handleWebhookEvent(body, signature);
+        response = await getPaymentProvider(PaymentProvider.STRIPE).handleWebhookEvent(
+          body,
+          signature,
+        );
       } catch (err) {
         // Log but always return 200 to Stripe to prevent retries
         fastify.log.error({ message: 'Stripe webhook processing error', error: String(err) });

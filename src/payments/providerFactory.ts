@@ -1,29 +1,62 @@
 import { env } from '@/config/env';
-import { IPaymentProvider } from '@/contracts';
+import { IPaymentProvider, PaymentProvider } from '@/contracts';
 
-let _provider: IPaymentProvider | null = null;
+const MOCK_KEY = '__mock__';
+const instances = new Map<string, IPaymentProvider>();
 
-export function getPaymentProvider(): IPaymentProvider {
-  if (_provider) return _provider;
+function useMockProvider(): boolean {
+  return env.NODE_ENV === 'test' || env.PAYMENT_PROVIDER === 'mock';
+}
 
-  const name = env.PAYMENT_PROVIDER;
+export function getPaymentProvider(providerType: PaymentProvider): IPaymentProvider {
+  const cacheKey = useMockProvider() ? MOCK_KEY : providerType;
+  const cached = instances.get(cacheKey);
+  if (cached) return cached;
 
-  // NODE_ENV=test always uses mock regardless of PAYMENT_PROVIDER setting
-  if (name === 'mock' || env.NODE_ENV === 'test') {
+  let instance: IPaymentProvider;
+  if (useMockProvider()) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { MockPaymentProvider } = require('./providers/mock/mockProvider');
-    _provider = new MockPaymentProvider();
-  } else if (name === 'stripe') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { StripePaymentProvider } = require('./providers/stripe');
-    _provider = new StripePaymentProvider();
+    instance = new MockPaymentProvider();
   } else {
-    throw new Error(`Unknown payment provider: "${name}". Valid values: stripe, mock`);
+    switch (providerType) {
+      case PaymentProvider.STRIPE: {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { StripePaymentProvider } = require('./providers/stripe');
+        instance = new StripePaymentProvider();
+        break;
+      }
+      default:
+        throw new Error(`Unsupported payment provider: ${providerType}`);
+    }
   }
 
-  return _provider!;
+  instances.set(cacheKey, instance);
+  return instance;
 }
 
 export function resetPaymentProvider(): void {
-  _provider = null;
+  instances.clear();
+}
+
+/** Look up the user's paymentProvider and return its provider instance. */
+export async function getProviderForUser(userId: string): Promise<IPaymentProvider> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prisma } = require('@/db/client');
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: { paymentProvider: true },
+  });
+  return getPaymentProvider(user.paymentProvider);
+}
+
+/** Look up the intent's user and return its provider instance. */
+export async function getProviderForIntent(intentId: string): Promise<IPaymentProvider> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prisma } = require('@/db/client');
+  const intent = await prisma.purchaseIntent.findUniqueOrThrow({
+    where: { id: intentId },
+    select: { user: { select: { paymentProvider: true } } },
+  });
+  return getPaymentProvider(intent.user.paymentProvider);
 }

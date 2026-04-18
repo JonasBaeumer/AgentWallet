@@ -30,7 +30,7 @@ describeIfStripe('Reconciliation integration', () => {
       data: {
         email: `recon-test-${Date.now()}@example.com`,
         telegramChatId: null,
-        stripeCardholderId: null,
+        providerCardholderId: null,
       },
     });
     userId = user.id;
@@ -76,7 +76,7 @@ describeIfStripe('Reconciliation integration', () => {
 
     // Write VirtualCard to DB
     await prisma.virtualCard.create({
-      data: { intentId, stripeCardId: cardId, last4: card.last4 },
+      data: { intentId, providerCardId: cardId, last4: card.last4 },
     });
 
     // Simulate a capture

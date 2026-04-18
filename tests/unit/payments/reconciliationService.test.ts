@@ -34,7 +34,7 @@ describe('reconcileIntent', () => {
       { type: 'RESERVE', amount: 5000 },
       { type: 'SETTLE', amount: 3500 },
     ]);
-    mockVirtualCard.mockResolvedValue({ intentId: 'intent-1', stripeCardId: 'ic_123' });
+    mockVirtualCard.mockResolvedValue({ intentId: 'intent-1', providerCardId: 'ic_123' });
     mockStripe.issuing.cards.retrieve.mockResolvedValue({ status: 'canceled' });
     mockStripe.issuing.transactions.list.mockResolvedValue({
       data: [{ id: 'itxn_1', amount: 3500, type: 'capture' }],
@@ -50,7 +50,7 @@ describe('reconcileIntent', () => {
   it('returns inSync:false with discrepancy when settledAmount differs from stripe captured', async () => {
     mockPot.mockResolvedValue({ reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' });
     mockLedgerEntries.mockResolvedValue([]);
-    mockVirtualCard.mockResolvedValue({ intentId: 'intent-2', stripeCardId: 'ic_456' });
+    mockVirtualCard.mockResolvedValue({ intentId: 'intent-2', providerCardId: 'ic_456' });
     mockStripe.issuing.cards.retrieve.mockResolvedValue({ status: 'canceled' });
     mockStripe.issuing.transactions.list.mockResolvedValue({
       data: [{ id: 'itxn_2', amount: 4000, type: 'capture' }],
@@ -65,7 +65,7 @@ describe('reconcileIntent', () => {
   it('returns inSync:false with discrepancy when pot is SETTLED but card is still active', async () => {
     mockPot.mockResolvedValue({ reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' });
     mockLedgerEntries.mockResolvedValue([]);
-    mockVirtualCard.mockResolvedValue({ intentId: 'intent-3', stripeCardId: 'ic_789' });
+    mockVirtualCard.mockResolvedValue({ intentId: 'intent-3', providerCardId: 'ic_789' });
     mockStripe.issuing.cards.retrieve.mockResolvedValue({ status: 'active' });
     mockStripe.issuing.transactions.list.mockResolvedValue({
       data: [{ id: 'itxn_3', amount: 3500, type: 'capture' }],

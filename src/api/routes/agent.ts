@@ -10,7 +10,7 @@ import {
   failCheckout,
 } from '@/orchestrator/intentService';
 import { settleIntent, returnIntent } from '@/ledger/potService';
-import { getPaymentProvider } from '@/payments';
+import { getProviderForIntent } from '@/payments';
 import { prisma } from '@/db/client';
 import { sendApprovalRequest } from '@/telegram/notificationService';
 
@@ -99,8 +99,8 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Cancel the virtual card — one purchase, one card (best-effort)
-      await getPaymentProvider()
-        .cancelCard(intentId)
+      await getProviderForIntent(intentId)
+        .then((p) => p.cancelCard(intentId))
         .catch(() => {});
 
       // Store receipt/error info in metadata
@@ -189,13 +189,14 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       const { intentId } = request.params;
 
       try {
-        const reveal = await getPaymentProvider().revealCard(intentId);
+        const provider = await getProviderForIntent(intentId);
+        const reveal = await provider.revealCard(intentId);
         return reply.send({ intentId, ...reveal });
       } catch (err: any) {
         if (err.name === 'CardAlreadyRevealedError') {
           return reply.status(409).send({ error: 'Card has already been revealed' });
         }
-        if (err.name === 'IntentNotFoundError') {
+        if (err.name === 'IntentNotFoundError' || err.code === 'P2025') {
           return reply.status(404).send({ error: `No card found for intent: ${intentId}` });
         }
         throw err;

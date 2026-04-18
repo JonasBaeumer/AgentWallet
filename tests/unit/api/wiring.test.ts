@@ -81,7 +81,7 @@ jest.mock('@/ledger/potService', () => ({
 const mockIssueVirtualCard = jest.fn().mockResolvedValue({
   id: 'vc-1',
   intentId: 'intent-1',
-  stripeCardId: 'ic_test',
+  providerCardId: 'ic_test',
   last4: '4242',
 });
 const mockRevealCard = jest.fn().mockResolvedValue({
@@ -94,7 +94,7 @@ const mockRevealCard = jest.fn().mockResolvedValue({
 const mockCancelCard = jest.fn().mockResolvedValue(undefined);
 const mockGetIssuingBalance = jest
   .fn()
-  .mockResolvedValue({ available: 999_999_99, currency: 'gbp' });
+  .mockResolvedValue({ available: 999_999_99, currency: 'eur' });
 const mockPaymentProvider = {
   issueCard: mockIssueVirtualCard,
   revealCard: mockRevealCard,
@@ -105,6 +105,8 @@ const mockPaymentProvider = {
 };
 jest.mock('@/payments', () => ({
   getPaymentProvider: () => mockPaymentProvider,
+  getProviderForIntent: () => Promise.resolve(mockPaymentProvider),
+  getProviderForUser: () => Promise.resolve(mockPaymentProvider),
 }));
 
 // Stripe (needed by webhooks route import chain)
@@ -415,9 +417,14 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
       userId: 'user-1',
       status: IntentStatus.AWAITING_APPROVAL,
       maxBudget: 10000,
-      currency: 'gbp',
+      currency: 'eur',
       metadata: { merchantName: 'Amazon UK', merchantUrl: 'https://amazon.co.uk', price: 9999 },
-      user: { id: 'user-1', email: 'test@agentpay.dev', mccAllowlist: [] },
+      user: {
+        id: 'user-1',
+        email: 'test@agentpay.dev',
+        mccAllowlist: [],
+        paymentProvider: 'STRIPE',
+      },
     };
   }
 
@@ -477,7 +484,6 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
     expect(mockIssueVirtualCard).toHaveBeenCalledWith(
       'intent-a3',
       10000,
-      'gbp',
       expect.any(Object),
     );
   });
@@ -519,7 +525,7 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
       expect.objectContaining({
         intentId: 'intent-a5',
         userId: 'user-1',
-        stripeCardId: 'ic_test',
+        providerCardId: 'ic_test',
         last4: '4242',
       }),
     );
@@ -835,7 +841,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
   }
 
   function _makeCard(intentId: string, revealedAt: Date | null = null) {
-    return { id: 'vc-1', intentId, stripeCardId: 'ic_test', last4: '4242', revealedAt };
+    return { id: 'vc-1', intentId, providerCardId: 'ic_test', last4: '4242', revealedAt };
   }
 
   it('returns 401 without X-Worker-Key header', async () => {

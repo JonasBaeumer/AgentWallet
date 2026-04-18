@@ -2,6 +2,7 @@
  * Test-only helpers for the payments module.
  * Import these only in test files — never in production code.
  */
+import { PaymentProvider } from '@/contracts';
 import { MockPaymentProvider } from './providers/mock/mockProvider';
 import { StripePaymentProvider } from './providers/stripe';
 import { getStripeClient } from './providers/stripe/stripeClient';
@@ -21,7 +22,7 @@ export function createStripeProvider() {
 }
 
 export function getMockProvider(): MockPaymentProvider {
-  const provider = getPaymentProvider();
+  const provider = getPaymentProvider(PaymentProvider.STRIPE);
   if (!(provider instanceof MockPaymentProvider)) {
     throw new Error('getMockProvider() called but active provider is not MockPaymentProvider');
   }

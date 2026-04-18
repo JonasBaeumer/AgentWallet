@@ -60,12 +60,12 @@ jest.mock('@/ledger/potService', () => ({
   returnIntent: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('@/payments', () => ({
-  getPaymentProvider: () => ({
+jest.mock('@/payments', () => {
+  const mockProvider = {
     issueCard: jest.fn().mockResolvedValue({
       id: 'vc-1',
       intentId: 'intent-1',
-      stripeCardId: 'ic_test',
+      providerCardId: 'ic_test',
       last4: '4242',
     }),
     revealCard: jest.fn().mockResolvedValue({
@@ -78,8 +78,13 @@ jest.mock('@/payments', () => ({
     freezeCard: jest.fn().mockResolvedValue(undefined),
     cancelCard: jest.fn().mockResolvedValue(undefined),
     handleWebhookEvent: jest.fn().mockResolvedValue(undefined),
-  }),
-}));
+  };
+  return {
+    getPaymentProvider: () => mockProvider,
+    getProviderForIntent: () => Promise.resolve(mockProvider),
+    getProviderForUser: () => Promise.resolve(mockProvider),
+  };
+});
 
 jest.mock('@/payments/providers/stripe/stripeClient', () => ({
   getStripeClient: () => ({ webhooks: { constructEvent: jest.fn() } }),

@@ -41,7 +41,7 @@ describe('enqueueCheckout', () => {
       merchantUrl: 'https://amazon.co.uk',
       price: 9999,
       currency: 'gbp',
-      stripeCardId: 'ic_123',
+      providerCardId: 'ic_123',
       last4: '4242',
     };
 

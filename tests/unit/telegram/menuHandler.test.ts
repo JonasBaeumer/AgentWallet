@@ -25,8 +25,11 @@ jest.mock('@/orchestrator/intentService', () => ({
 // Mock payment provider
 const mockCancelCard = jest.fn();
 const mockFreezeCard = jest.fn();
+const mockProvider = { cancelCard: mockCancelCard, freezeCard: mockFreezeCard };
 jest.mock('@/payments', () => ({
-  getPaymentProvider: () => ({ cancelCard: mockCancelCard, freezeCard: mockFreezeCard }),
+  getPaymentProvider: () => mockProvider,
+  getProviderForIntent: () => Promise.resolve(mockProvider),
+  getProviderForUser: () => Promise.resolve(mockProvider),
 }));
 
 // Mock sessionStore
