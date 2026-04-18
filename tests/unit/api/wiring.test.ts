@@ -481,11 +481,7 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
-    expect(mockIssueVirtualCard).toHaveBeenCalledWith(
-      'intent-a3',
-      10000,
-      expect.any(Object),
-    );
+    expect(mockIssueVirtualCard).toHaveBeenCalledWith('intent-a3', 10000, expect.any(Object));
   });
 
   it('calls markCardIssued and startCheckout via orchestrator', async () => {
