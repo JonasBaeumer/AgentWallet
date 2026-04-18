@@ -1,4 +1,4 @@
-# Trusted Payment Infrastructure for Agents
+# AgentWallet
 
 > The secure payment rail every AI agent runs on. The agent can't spend a cent more than you said.
 
