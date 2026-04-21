@@ -258,7 +258,16 @@ async function savePrefPolicy(
   userId: string,
   policy: CardCancelPolicy,
 ): Promise<void> {
-  await prisma.user.update({ where: { id: userId }, data: { cancelPolicy: policy } });
+  // Switching away from AFTER_TTL must clear any stale TTL so checkout cannot
+  // later silently skip cancellation due to a leftover cardTtlMinutes value.
+  // Mirror the invariant enforced by the API-level Zod schema.
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      cancelPolicy: policy,
+      cardTtlMinutes: policy === CardCancelPolicy.AFTER_TTL ? undefined : null,
+    },
+  });
   const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
   await editMenu(
     bot,

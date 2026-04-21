@@ -421,7 +421,7 @@ describe('menu_preferences', () => {
 // ── menu_pref_policy ─────────────────────────────────────────────────────────
 
 describe('menu_pref_policy', () => {
-  it('saves IMMEDIATE policy and shows confirmation', async () => {
+  it('saves IMMEDIATE policy, clears stale cardTtlMinutes, and shows confirmation', async () => {
     (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
 
     await handleMenuCallback(
@@ -433,14 +433,42 @@ describe('menu_pref_policy', () => {
       fromId,
     );
 
+    // Regression (issue #89, bug 1): switching away from AFTER_TTL must clear
+    // cardTtlMinutes so a stale TTL cannot silently skip cancellation later.
     expect(mockPrisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { cancelPolicy: 'IMMEDIATE' },
+        data: { cancelPolicy: 'IMMEDIATE', cardTtlMinutes: null },
       }),
     );
     const text = mockEditMessageText.mock.calls[0][2] as string;
     expect(text.toLowerCase()).toContain('saved');
   });
+
+  it.each(['ON_TRANSACTION', 'MANUAL'] as const)(
+    'clears stale cardTtlMinutes when switching to %s',
+    async (policy) => {
+      (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue({
+        ...baseUser,
+        cancelPolicy: 'AFTER_TTL',
+        cardTtlMinutes: 240,
+      });
+
+      await handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_pref_policy',
+        policy,
+        fromId,
+      );
+
+      expect(mockPrisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { cancelPolicy: policy, cardTtlMinutes: null },
+        }),
+      );
+    },
+  );
 
   it('shows TTL picker when AFTER_TTL is selected', async () => {
     (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);

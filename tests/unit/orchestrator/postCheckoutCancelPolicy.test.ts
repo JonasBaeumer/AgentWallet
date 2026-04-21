@@ -102,7 +102,7 @@ describe('completeCheckout — AFTER_TTL cancel policy', () => {
     expect(mockCancelCard).not.toHaveBeenCalled();
   });
 
-  it('does nothing when cardTtlMinutes is null even with AFTER_TTL policy', async () => {
+  it('falls back to immediate cancel when cardTtlMinutes is null under AFTER_TTL', async () => {
     (mockPrisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue(
       intentWithUser({ cancelPolicy: 'AFTER_TTL', cardTtlMinutes: null }),
     );
@@ -110,7 +110,7 @@ describe('completeCheckout — AFTER_TTL cancel policy', () => {
     await completeCheckout('intent-1', 1000);
     await flush();
 
-    expect(mockCancelCard).not.toHaveBeenCalled();
+    expect(mockCancelCard).toHaveBeenCalledWith('intent-1');
     expect(mockEnqueueCancelCard).not.toHaveBeenCalled();
   });
 });

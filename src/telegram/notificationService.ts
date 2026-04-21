@@ -5,6 +5,24 @@ import { logger } from '@/config/logger';
 
 const log = logger.child({ module: 'telegram/notificationService' });
 
+export async function sendManualCardPendingNotice(
+  telegramChatId: string,
+  intentId: string,
+  label: string,
+): Promise<void> {
+  try {
+    const bot = getTelegramBot();
+    const keyboard = new InlineKeyboard().text('Cancel Card Now', `menu_card_cancel:${intentId}`);
+    await bot.api.sendMessage(
+      Number(telegramChatId),
+      `Checkout complete for "${label}".\n\nYour virtual card is frozen. Tap below when you no longer need it.`,
+      { reply_markup: keyboard },
+    );
+  } catch (err) {
+    log.error({ intentId, err }, 'Failed to send MANUAL card notification');
+  }
+}
+
 export async function sendApprovalRequest(intentId: string): Promise<void> {
   const intent = await prisma.purchaseIntent.findUnique({
     where: { id: intentId },
