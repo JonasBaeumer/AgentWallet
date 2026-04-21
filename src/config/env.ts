@@ -43,9 +43,7 @@ export const envSchema = z.object({
     .default('false')
     .transform((v) => v === 'true'),
   PAYMENT_PROVIDER: z.string().default('stripe'),
-  LOG_LEVEL: z
-    .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
-    .default('info'),
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 });
 
 export type Env = z.infer<typeof envSchema>;
