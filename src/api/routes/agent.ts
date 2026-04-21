@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { workerAuthMiddleware } from '@/api/middleware/auth';
+import { agentContextMiddleware } from '@/api/middleware/agentContext';
 import { agentQuoteSchema, agentResultSchema, agentRegisterSchema } from '@/api/validators/agent';
 import { IntentStatus } from '@/contracts';
 import {
@@ -26,6 +27,11 @@ function generatePairingCode(): string {
 }
 
 export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
+  // Bind { agentId, route, intentId? } to request.log for every /v1/agent/* request
+  // and expose request.agentId to handlers. Runs before workerAuthMiddleware so
+  // even rejected requests are logged with their agentId for traceability.
+  fastify.addHook('onRequest', agentContextMiddleware);
+
   // POST /v1/agent/quote — worker posts search result
   // Flow: SEARCHING → QUOTED → AWAITING_APPROVAL
   fastify.post(
@@ -49,10 +55,14 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // SEARCHING → QUOTED (stores quote data in metadata via orchestrator)
-      await receiveQuote(intentId, { merchantName, merchantUrl, price, currency });
+      await receiveQuote(
+        intentId,
+        { merchantName, merchantUrl, price, currency },
+        request.agentId,
+      );
 
       // QUOTED → AWAITING_APPROVAL
-      await requestApproval(intentId);
+      await requestApproval(intentId, request.agentId);
 
       // Fire-and-forget Telegram notification — must not block the HTTP response
       sendApprovalRequest(intentId).catch((err: unknown) =>
@@ -91,10 +101,10 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       if (success) {
-        await completeCheckout(intentId, actualAmount ?? 0);
+        await completeCheckout(intentId, actualAmount ?? 0, request.agentId);
         await settleIntent(intentId, actualAmount ?? 0);
       } else {
-        await failCheckout(intentId, errorMessage ?? 'Checkout failed');
+        await failCheckout(intentId, errorMessage ?? 'Checkout failed', request.agentId);
         await returnIntent(intentId);
       }
 

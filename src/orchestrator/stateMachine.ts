@@ -16,6 +16,7 @@ export async function transitionIntent(
   event: IntentEvent,
   payload: Record<string, unknown> = {},
   actor: string = 'system',
+  agentId: string | null = null,
 ): Promise<TransitionResult> {
   return await prisma.$transaction(async (tx) => {
     const intent = await tx.purchaseIntent.findUnique({ where: { id: intentId } });
@@ -33,12 +34,16 @@ export async function transitionIntent(
       data: {
         intentId,
         actor,
+        agentId,
         event,
         payload: { previousStatus, newStatus, ...payload } as any,
       },
     });
 
-    log.info({ intentId, event, previousStatus, newStatus, actor }, 'Intent transition');
+    log.info(
+      { intentId, event, previousStatus, newStatus, actor, agentId },
+      'Intent transition',
+    );
 
     return {
       intent: updated as unknown as PurchaseIntentData,

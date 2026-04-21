@@ -109,6 +109,7 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
           data: {
             intentId: null,
             actor: userId,
+            agentId,
             event: 'AGENT_UNLINKED',
             payload: { agentId, cancelledIntentIds },
           },

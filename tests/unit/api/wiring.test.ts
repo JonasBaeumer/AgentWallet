@@ -359,8 +359,38 @@ describe('POST /v1/agent/quote wiring', () => {
         merchantUrl: 'https://amazon.co.uk',
         price: 9999,
       }),
+      null,
     );
-    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1');
+    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1', null);
+  });
+
+  it('propagates X-Agent-Id header into orchestrator calls', async () => {
+    seedSearchingIntent('intent-qAgent');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: {
+        'content-type': 'application/json',
+        'x-worker-key': 'test-worker-key',
+        'x-agent-id': 'ag_test_123',
+      },
+      body: JSON.stringify({
+        intentId: 'intent-qAgent',
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 4200,
+        currency: 'gbp',
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockReceiveQuote).toHaveBeenCalledWith(
+      'intent-qAgent',
+      expect.any(Object),
+      'ag_test_123',
+    );
+    expect(mockRequestApproval).toHaveBeenCalledWith('intent-qAgent', 'ag_test_123');
   });
 
   it('does NOT call receiveQuote for non-SEARCHING intent', async () => {
@@ -686,7 +716,7 @@ describe('POST /v1/agent/result wiring — success', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-r1', 8000);
+    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-r1', 8000, null);
     expect(mockSettleIntent).toHaveBeenCalledWith('intent-r1', 8000);
     expect(mockFailCheckout).not.toHaveBeenCalled();
     expect(mockReturnIntent).not.toHaveBeenCalled();
@@ -739,7 +769,7 @@ describe('POST /v1/agent/result wiring — failure', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f1', 'Payment declined');
+    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f1', 'Payment declined', null);
     expect(mockReturnIntent).toHaveBeenCalledWith('intent-f1');
     expect(mockCompleteCheckout).not.toHaveBeenCalled();
     expect(mockSettleIntent).not.toHaveBeenCalled();
