@@ -469,6 +469,10 @@ For the full bot setup and signup flow guide see [docs/telegram-setup.md](docs/t
 
 ## API Reference
 
+For the full human-readable reference — request/response schemas, examples,
+error tables, and an end-to-end curl walkthrough — see
+[docs/api.md](docs/api.md). The tables below are a quick index.
+
 ### User / Intent endpoints
 
 | Method | Path | Auth | Description |
