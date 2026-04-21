@@ -1,24 +1,92 @@
 import dotenv from 'dotenv';
+import { z } from 'zod';
+
 dotenv.config();
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing required env var: ${name}`);
-  return value;
+const nonEmpty = (label: string) =>
+  z
+    .string({ required_error: `${label} is required` })
+    .trim()
+    .min(1, `${label} is required`);
+
+export const envSchema = z.object({
+  DATABASE_URL: nonEmpty('DATABASE_URL').pipe(
+    z
+      .string()
+      .regex(
+        /^postgres(ql)?:\/\//,
+        'DATABASE_URL must be a PostgreSQL connection string (postgresql://...)',
+      ),
+  ),
+  REDIS_URL: nonEmpty('REDIS_URL').pipe(
+    z
+      .string()
+      .regex(
+        /^redis(s)?:\/\//,
+        'REDIS_URL must be a Redis connection string (redis://... or rediss://...)',
+      ),
+  ),
+  WORKER_API_KEY: nonEmpty('WORKER_API_KEY'),
+  STRIPE_SECRET_KEY: z.string().default('sk_test_placeholder'),
+  STRIPE_WEBHOOK_SECRET: z.string().default('whsec_placeholder'),
+  PORT: z
+    .string()
+    .default('3000')
+    .transform((v) => Number.parseInt(v, 10))
+    .pipe(z.number().int().positive().max(65535)),
+  NODE_ENV: z.string().default('development'),
+  TELEGRAM_BOT_TOKEN: z.string().default(''),
+  TELEGRAM_WEBHOOK_SECRET: z.string().default(''),
+  TELEGRAM_TEST_CHAT_ID: z.string().default(''),
+  TELEGRAM_MOCK: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
+  PAYMENT_PROVIDER: z.string().default('stripe'),
+  LOG_LEVEL: z
+    .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
+    .default('info'),
+});
+
+export type Env = z.infer<typeof envSchema>;
+
+export function formatEnvValidationErrors(error: z.ZodError): string {
+  const lines = error.issues.map((issue) => {
+    const name = issue.path.join('.') || '(root)';
+    return `  - ${name}: ${issue.message}`;
+  });
+  return [
+    '',
+    'Environment configuration is invalid. Please fix the following before starting:',
+    ...lines,
+    '',
+    'Tip: copy .env.example to .env and fill in the required values,',
+    'or run `./scripts/setup.sh` for a guided setup.',
+    '',
+  ].join('\n');
 }
 
-export const env = {
-  DATABASE_URL: requireEnv('DATABASE_URL'),
-  REDIS_URL: requireEnv('REDIS_URL'),
-  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder',
-  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || 'whsec_placeholder',
-  WORKER_API_KEY: requireEnv('WORKER_API_KEY'),
-  PORT: parseInt(process.env.PORT || '3000', 10),
-  NODE_ENV: process.env.NODE_ENV || 'development',
-  TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
-  TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET || '',
-  TELEGRAM_TEST_CHAT_ID: process.env.TELEGRAM_TEST_CHAT_ID || '',
-  TELEGRAM_MOCK: process.env.TELEGRAM_MOCK === 'true',
-  PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER || 'stripe',
-  LOG_LEVEL: process.env.LOG_LEVEL || 'info',
-};
+export function validateEnv(source: NodeJS.ProcessEnv = process.env): Env {
+  const parsed = envSchema.safeParse(source);
+  if (!parsed.success) {
+    const message = formatEnvValidationErrors(parsed.error);
+    const err = new Error(message);
+    err.name = 'EnvValidationError';
+    throw err;
+  }
+  return parsed.data;
+}
+
+function loadEnv(): Env {
+  try {
+    return validateEnv();
+  } catch (err) {
+    if (err instanceof Error && err.name === 'EnvValidationError') {
+      process.stderr.write(`${err.message}\n`);
+      process.exit(1);
+    }
+    throw err;
+  }
+}
+
+export const env: Env = loadEnv();

@@ -262,20 +262,31 @@ Every purchase is a `PurchaseIntent` tracked through an explicit state machine. 
 - **Stripe account** with Issuing enabled — see [docs/stripe-setup.md](docs/stripe-setup.md) for the full walkthrough
 - **Telegram bot token** (optional) — for approval notifications and user signup; see [docs/telegram-setup.md](docs/telegram-setup.md)
 
-### 1. Install and configure
+### 1. One-command setup (recommended)
 
 ```bash
-git clone https://github.com/your-org/trustedpaymentinfrastructureforagents
+git clone https://github.com/JonasBaeumer/trustedpaymentinfrastructureforagents
 cd trustedpaymentinfrastructureforagents
-npm install
-cp .env.example .env
+./scripts/setup.sh        # or: make setup
 ```
 
-Open `.env` and fill in at minimum:
+The script checks prerequisites (Node 20+, Docker, Stripe CLI), creates `.env`
+from `.env.example`, prompts for the Stripe + Telegram values, starts
+Postgres + Redis, installs dependencies, and runs `prisma migrate deploy`
+followed by `npm run seed`. Use `./scripts/setup.sh --yes` for an
+unattended run (CI-safe).
 
-```env
-STRIPE_SECRET_KEY=sk_test_...
-WORKER_API_KEY=local-dev-worker-key
+Once it finishes, skip to **step 4** to start the server.
+
+<details>
+<summary>Manual setup (fallback)</summary>
+
+```bash
+npm install
+cp .env.example .env
+# Open .env and fill in at minimum:
+#   STRIPE_SECRET_KEY=sk_test_...
+#   WORKER_API_KEY=local-dev-worker-key
 ```
 
 Everything else has safe defaults for local development.
@@ -284,6 +295,7 @@ Everything else has safe defaults for local development.
 
 ```bash
 docker compose up -d    # starts Postgres 16 + Redis 7
+# or: make infra
 ```
 
 ### 3. Migrate and seed
@@ -293,11 +305,20 @@ npm run db:migrate      # creates all tables
 npm run seed            # creates demo user: demo@agentpay.dev, £1 000 balance
 ```
 
+</details>
+
 ### 4. Start the server
 
 ```bash
 npm run dev             # hot-reload dev server on http://localhost:3000
+# or: make dev
 ```
+
+Run `make help` to see every common developer task in one place.
+
+If any required environment variable is missing or malformed, the server
+prints a single human-readable block listing exactly which keys need
+attention (no stack trace) and exits.
 
 ### 5. (Optional) Start the stub worker
 
