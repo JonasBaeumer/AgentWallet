@@ -166,13 +166,7 @@ export async function failCheckout(
   agentId: string | null = null,
 ): Promise<TransitionResult> {
   const actor = agentId ?? 'system';
-  return transitionIntent(
-    intentId,
-    IntentEvent.CHECKOUT_FAILED,
-    { errorMessage },
-    actor,
-    agentId,
-  );
+  return transitionIntent(intentId, IntentEvent.CHECKOUT_FAILED, { errorMessage }, actor, agentId);
 }
 
 async function cleanupExpiredIntent(intentId: string): Promise<void> {

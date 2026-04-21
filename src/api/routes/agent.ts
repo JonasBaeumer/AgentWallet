@@ -55,11 +55,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // SEARCHING → QUOTED (stores quote data in metadata via orchestrator)
-      await receiveQuote(
-        intentId,
-        { merchantName, merchantUrl, price, currency },
-        request.agentId,
-      );
+      await receiveQuote(intentId, { merchantName, merchantUrl, price, currency }, request.agentId);
 
       // QUOTED → AWAITING_APPROVAL
       await requestApproval(intentId, request.agentId);

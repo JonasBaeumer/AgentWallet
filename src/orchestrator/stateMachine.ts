@@ -40,10 +40,7 @@ export async function transitionIntent(
       },
     });
 
-    log.info(
-      { intentId, event, previousStatus, newStatus, actor, agentId },
-      'Intent transition',
-    );
+    log.info({ intentId, event, previousStatus, newStatus, actor, agentId }, 'Intent transition');
 
     return {
       intent: updated as unknown as PurchaseIntentData,

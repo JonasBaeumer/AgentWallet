@@ -56,13 +56,7 @@ describe('AuditEvent actor attribution', () => {
   describe('transitionIntent', () => {
     it('records actor=agentId and agentId=<agentId> when an agent triggers the transition', async () => {
       const { auditCreate } = setupTxMock(IntentStatus.RECEIVED);
-      await transitionIntent(
-        'intent-1',
-        IntentEvent.INTENT_CREATED,
-        {},
-        'ag_abc123',
-        'ag_abc123',
-      );
+      await transitionIntent('intent-1', IntentEvent.INTENT_CREATED, {}, 'ag_abc123', 'ag_abc123');
 
       expect(auditCreate).toHaveBeenCalledTimes(1);
       const row = auditCreate.mock.calls[0][0].data;
