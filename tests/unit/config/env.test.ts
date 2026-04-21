@@ -1,7 +1,9 @@
 import { validateEnv, formatEnvValidationErrors, envSchema } from '@/config/env';
 
+type EnvSource = Record<string, string | undefined>;
+
 describe('env validator', () => {
-  const VALID: NodeJS.ProcessEnv = {
+  const VALID: EnvSource = {
     DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/agentpay',
     REDIS_URL: 'redis://localhost:6379',
     WORKER_API_KEY: 'local-dev-worker-key',
@@ -39,19 +41,20 @@ describe('env validator', () => {
   });
 
   it('rejects malformed DATABASE_URL and REDIS_URL values', () => {
+    let caught: Error | undefined;
     try {
       validateEnv({
         ...VALID,
         DATABASE_URL: 'mysql://localhost',
         REDIS_URL: 'http://localhost',
       });
-      fail('expected validation to throw');
     } catch (err) {
-      const e = err as Error;
-      expect(e.name).toBe('EnvValidationError');
-      expect(e.message).toMatch(/DATABASE_URL.*PostgreSQL/);
-      expect(e.message).toMatch(/REDIS_URL.*Redis/);
+      caught = err as Error;
     }
+    expect(caught).toBeDefined();
+    expect(caught?.name).toBe('EnvValidationError');
+    expect(caught?.message).toMatch(/DATABASE_URL.*PostgreSQL/);
+    expect(caught?.message).toMatch(/REDIS_URL.*Redis/);
   });
 
   it('rejects invalid LOG_LEVEL values', () => {

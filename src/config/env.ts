@@ -66,7 +66,7 @@ export function formatEnvValidationErrors(error: z.ZodError): string {
   ].join('\n');
 }
 
-export function validateEnv(source: NodeJS.ProcessEnv = process.env): Env {
+export function validateEnv(source: Record<string, string | undefined> = process.env): Env {
   const parsed = envSchema.safeParse(source);
   if (!parsed.success) {
     const message = formatEnvValidationErrors(parsed.error);
