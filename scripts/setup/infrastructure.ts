@@ -1,7 +1,7 @@
 import net from 'net';
 import { log, select, isCancel } from '@clack/prompts';
 import { SetupContext } from './types';
-import { exec, pollUntil } from './utils';
+import { exec, pollUntil, SubStep, subStepPass, subStepFail, logSubSteps } from './utils';
 
 function isContainerRunning(serviceName: string): boolean {
   const result = exec(`docker compose ps --format json ${serviceName}`);
@@ -251,9 +251,13 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
   const redisRunning = isContainerRunning('redis');
 
   if (pgRunning && redisRunning) {
-    log.info('Docker containers already running — skipping');
+    log.info('Docker containers already running');
     ctx.results.push({ name: 'PostgreSQL', status: 'pass', message: 'Already running' });
     ctx.results.push({ name: 'Redis', status: 'pass', message: 'Already running' });
+    logSubSteps([
+      subStepPass('PostgreSQL', 'Already running'),
+      subStepPass('Redis', 'Already running'),
+    ]);
     return;
   }
 
@@ -353,30 +357,29 @@ export async function startInfrastructure(ctx: SetupContext): Promise<void> {
   const pgPort = ctx.envVars.DATABASE_URL?.match(/:(\d+)\//)?.[1] || '5432';
   const redisPort = ctx.envVars.REDIS_URL?.match(/:(\d+)$/)?.[1] || '6379';
 
+  const healthSteps: SubStep[] = [];
+
   const pgReady = await pollUntil(
     () => runCompose('docker compose exec -T postgres pg_isready -U postgres', composeEnv, 5000).code === 0,
     { intervalMs: 1000, timeoutMs: 30_000, label: 'Waiting for PostgreSQL' },
   );
-  ctx.results.push({
-    name: 'PostgreSQL',
-    status: pgReady ? 'pass' : 'fail',
-    message: pgReady ? `Healthy (port ${pgPort})` : 'Timed out — check `docker compose logs postgres`',
-  });
+  const pgMsg = pgReady ? `Healthy (port ${pgPort})` : 'Timed out — check `docker compose logs postgres`';
+  healthSteps.push(pgReady ? subStepPass('PostgreSQL', pgMsg) : subStepFail('PostgreSQL', pgMsg));
+  ctx.results.push({ name: 'PostgreSQL', status: pgReady ? 'pass' : 'fail', message: pgMsg });
 
   const redisReady = await pollUntil(
     () => runCompose('docker compose exec -T redis redis-cli ping', composeEnv, 5000).stdout.includes('PONG'),
     { intervalMs: 1000, timeoutMs: 15_000, label: 'Waiting for Redis' },
   );
-  ctx.results.push({
-    name: 'Redis',
-    status: redisReady ? 'pass' : 'fail',
-    message: redisReady ? `Healthy (port ${redisPort})` : 'Timed out — check `docker compose logs redis`',
-  });
+  const redisMsg = redisReady ? `Healthy (port ${redisPort})` : 'Timed out — check `docker compose logs redis`';
+  healthSteps.push(redisReady ? subStepPass('Redis', redisMsg) : subStepFail('Redis', redisMsg));
+  ctx.results.push({ name: 'Redis', status: redisReady ? 'pass' : 'fail', message: redisMsg });
+
+  logSubSteps(healthSteps);
 
   // Persist env changes if ports were remapped
   if (portOverrides.length > 0) {
     const { writeEnvFile, projectPath } = require('./utils');
     writeEnvFile(ctx.envPath, ctx.envVars, projectPath('.env.example'));
-    log.success('Updated .env with remapped ports');
   }
 }

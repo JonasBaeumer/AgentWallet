@@ -7,7 +7,7 @@ import { startInfrastructure } from './setup/infrastructure';
 import { setupDatabase } from './setup/database';
 import { setupStripe } from './setup/stripe';
 import { setupTelegram } from './setup/telegram';
-import { runVerification } from './setup/verification';
+import { runVerification, runIntegrationSuite } from './setup/verification';
 import { launchServices } from './setup/services';
 import { printSummary } from './setup/summary';
 import { SetupContext } from './setup/types';
@@ -30,6 +30,7 @@ async function main(): Promise<void> {
     envVars: {},
     skipTelegram: false,
     generatedApiKey: null,
+    launchedServices: new Set(),
   };
 
   printHeader();
@@ -90,7 +91,10 @@ async function main(): Promise<void> {
     await launchServices(ctx);
   }
 
-  // Phase 9: Summary
+  // Phase 9: Integration tests (requires services running)
+  await runIntegrationSuite(ctx);
+
+  // Phase 10: Summary
   printSummary(ctx);
 
   const hasFails = ctx.results.some((r) => r.status === 'fail');

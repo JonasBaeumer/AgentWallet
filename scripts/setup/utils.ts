@@ -2,7 +2,8 @@ import { execSync, spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { spinner as clackSpinner } from '@clack/prompts';
+import { log, spinner as clackSpinner } from '@clack/prompts';
+import color from 'picocolors';
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 
@@ -213,4 +214,43 @@ export function execStreaming(
       resolve({ stdout: stdout.trim(), stderr: err.message, code: 1 });
     });
   });
+}
+
+// ── Sub-step rendering ────────────────────────────────────────────
+
+export interface SubStep {
+  icon: string;
+  label: string;
+  detail: string;
+}
+
+export function subStepPass(label: string, detail: string): SubStep {
+  return { icon: color.green('✓'), label, detail };
+}
+
+export function subStepFail(label: string, detail: string): SubStep {
+  return { icon: color.red('✗'), label, detail };
+}
+
+export function subStepWarn(label: string, detail: string): SubStep {
+  return { icon: color.yellow('▲'), label, detail };
+}
+
+export function subStepSkip(label: string, detail: string): SubStep {
+  return { icon: color.dim('○'), label, detail };
+}
+
+/**
+ * Render sub-steps as indented lines on the clack │ bar.
+ * Call this after a spinner stops to show individual results
+ * grouped under the parent step.
+ */
+export function logSubSteps(steps: SubStep[]): void {
+  if (steps.length === 0) return;
+  const labelWidth = Math.max(...steps.map((s) => s.label.length), 12);
+  const lines = steps.map((s) => {
+    const padded = s.label + ' '.repeat(Math.max(0, labelWidth - s.label.length));
+    return `  ${s.icon} ${padded}  ${color.dim(s.detail)}`;
+  });
+  log.message(lines.join('\n'), { symbol: color.gray('│') });
 }

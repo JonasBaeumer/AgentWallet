@@ -1,8 +1,8 @@
-import { log, confirm, isCancel } from '@clack/prompts';
+import { log, confirm, isCancel, spinner } from '@clack/prompts';
 import http from 'http';
 import color from 'picocolors';
 import { SetupContext } from './types';
-import { exec, sleep } from './utils';
+import { exec, sleep, SubStep, subStepPass, subStepFail, subStepWarn, subStepSkip, logSubSteps } from './utils';
 import { ChildProcess, spawn } from 'child_process';
 import path from 'path';
 
@@ -199,16 +199,8 @@ function runJestWithProgress(
 
 // ── Phase functions ────────────────────────────────────────────────
 
-async function checkHealthEndpoint(ctx: SetupContext): Promise<void> {
+async function checkHealthEndpoint(ctx: SetupContext): Promise<SubStep> {
   const port = ctx.envVars.PORT || '3000';
-
-  let frameIdx = 0;
-  process.stdout.write(`  ${color.cyan(SPINNER_FRAMES[0])} Starting dev server for health check`);
-  const spinInterval = setInterval(() => {
-    frameIdx++;
-    clearLine();
-    process.stdout.write(`  ${color.cyan(SPINNER_FRAMES[frameIdx % SPINNER_FRAMES.length])} Starting dev server for health check`);
-  }, 80);
 
   let serverProcess: ChildProcess | null = null;
   try {
@@ -231,29 +223,16 @@ async function checkHealthEndpoint(ctx: SetupContext): Promise<void> {
       }
     }
 
-    clearInterval(spinInterval);
-    clearLine();
-
     if (healthy) {
-      process.stdout.write(`  ${color.green('✓')} Health endpoint responding\n`);
       ctx.results.push({ name: 'Health endpoint', status: 'pass', message: `localhost:${port}/health OK` });
+      return subStepPass('Health endpoint', `localhost:${port}/health OK`);
     } else {
-      process.stdout.write(`  ${color.yellow('▲')} Health endpoint not responding\n`);
-      ctx.results.push({
-        name: 'Health endpoint',
-        status: 'warn',
-        message: `localhost:${port}/health did not respond within 30s`,
-      });
+      ctx.results.push({ name: 'Health endpoint', status: 'warn', message: `No response within 30s` });
+      return subStepWarn('Health endpoint', 'No response within 30s');
     }
   } catch (err: any) {
-    clearInterval(spinInterval);
-    clearLine();
-    process.stdout.write(`  ${color.yellow('▲')} Could not start dev server\n`);
-    ctx.results.push({
-      name: 'Health endpoint',
-      status: 'warn',
-      message: err.message || 'Server start failed',
-    });
+    ctx.results.push({ name: 'Health endpoint', status: 'warn', message: err.message || 'Server start failed' });
+    return subStepWarn('Health endpoint', err.message || 'Server start failed');
   } finally {
     if (serverProcess && serverProcess.pid) {
       try {
@@ -265,27 +244,11 @@ async function checkHealthEndpoint(ctx: SetupContext): Promise<void> {
   }
 }
 
-async function runUnitTests(ctx: SetupContext): Promise<void> {
-  let shouldRun = ctx.nonInteractive;
-  if (!ctx.nonInteractive) {
-    const answer = await confirm({ message: 'Run unit tests?', initialValue: true });
-    shouldRun = !isCancel(answer) && answer;
-  }
-
-  if (!shouldRun) {
-    ctx.results.push({ name: 'Unit tests', status: 'skip', message: 'Skipped by user' });
-    return;
-  }
-
-  // Use --testPathIgnorePatterns to exclude integration tests — same filter
-  // is passed to both --listTests (inside runJestWithProgress) and the actual run.
+async function runUnitTests(ctx: SetupContext): Promise<SubStep> {
   const jestArgs = ['--no-coverage', '--testPathIgnorePatterns=integration'];
 
-  log.info('Running unit tests...');
   console.log();
-
   const result = await runJestWithProgress(jestArgs, { timeout: 120_000 });
-
   console.log();
 
   if (result.failures.length > 0) {
@@ -297,13 +260,182 @@ async function runUnitTests(ctx: SetupContext): Promise<void> {
 
   if (result.failed === 0) {
     ctx.results.push({ name: 'Unit tests', status: 'pass', message: `${result.passed} suites passed` });
+    return subStepPass('Unit tests', `${result.passed} suites passed`);
   } else {
     ctx.results.push({ name: 'Unit tests', status: 'warn', message: `${result.passed} passed, ${result.failed} failed` });
+    return subStepWarn('Unit tests', `${result.passed} passed, ${result.failed} failed`);
+  }
+}
+
+async function runIntegrationTests(ctx: SetupContext): Promise<SubStep> {
+  const jestArgs = [
+    '--no-coverage', '--runInBand',
+    '--testPathPattern=integration',
+    '--testPathIgnorePatterns=\\.live\\.',
+  ];
+  const env = { ...ctx.envVars, TELEGRAM_MOCK: 'true' };
+
+  const count = countTestSuites(jestArgs, env);
+  if (count === 0) {
+    ctx.results.push({ name: 'Integration tests', status: 'skip', message: 'No suites found' });
+    return subStepSkip('Integration tests', 'No suites found');
+  }
+
+  console.log();
+  const result = await runJestWithProgress(jestArgs, { timeout: 300_000, env });
+  console.log();
+
+  if (result.failures.length > 0) {
+    log.warn('Failed suites:');
+    for (const f of result.failures) {
+      log.warn(`  ${f}`);
+    }
+  }
+
+  if (result.failed === 0) {
+    ctx.results.push({ name: 'Integration tests', status: 'pass', message: `${result.passed} suites passed` });
+    return subStepPass('Integration tests', `${result.passed} suites passed`);
+  } else {
+    ctx.results.push({ name: 'Integration tests', status: 'warn', message: `${result.passed} passed, ${result.failed} failed` });
+    return subStepWarn('Integration tests', `${result.passed} passed, ${result.failed} failed`);
+  }
+}
+
+async function runLiveTelegramTests(ctx: SetupContext): Promise<SubStep> {
+  const hasToken = !!ctx.envVars.TELEGRAM_BOT_TOKEN;
+  const hasChatId = !!ctx.envVars.TELEGRAM_TEST_CHAT_ID;
+
+  if (!hasToken || !hasChatId) {
+    ctx.results.push({ name: 'Live Telegram tests', status: 'skip', message: 'No bot token or chat ID' });
+    return subStepSkip('Live Telegram tests', 'No bot token or chat ID');
+  }
+
+  const jestArgs = [
+    '--no-coverage', '--runInBand', '--forceExit',
+    '--config', 'jest.integration.live.js',
+    '--testPathPattern=\\.live\\.',
+    '--testTimeout=120000',
+  ];
+  const env = { ...ctx.envVars, TELEGRAM_MOCK: 'false' };
+
+  const count = countTestSuites(jestArgs, env);
+  if (count === 0) {
+    ctx.results.push({ name: 'Live Telegram tests', status: 'skip', message: 'No suites found' });
+    return subStepSkip('Live Telegram tests', 'No suites found');
+  }
+
+  log.warn(
+    'Open your Telegram chat and follow the bot instructions.\n' +
+    'Each step will wait for you to tap a button or send a reply.',
+  );
+
+  console.log();
+  const result = await runJestWithProgress(jestArgs, { timeout: 600_000, env });
+  console.log();
+
+  if (result.failures.length > 0) {
+    log.warn('Failed suites:');
+    for (const f of result.failures) {
+      log.warn(`  ${f}`);
+    }
+  }
+
+  if (result.failed === 0) {
+    ctx.results.push({ name: 'Live Telegram tests', status: 'pass', message: `${result.passed} suites passed` });
+    return subStepPass('Live Telegram tests', `${result.passed} suites passed`);
+  } else {
+    ctx.results.push({ name: 'Live Telegram tests', status: 'warn', message: `${result.passed} passed, ${result.failed} failed` });
+    return subStepWarn('Live Telegram tests', `${result.passed} passed, ${result.failed} failed`);
   }
 }
 
 export async function runVerification(ctx: SetupContext): Promise<void> {
-  log.info('Running verification checks...');
-  await checkHealthEndpoint(ctx);
-  await runUnitTests(ctx);
+  const s = spinner();
+  s.start('Running verification checks...');
+
+  const steps: SubStep[] = [];
+
+  // Health endpoint
+  s.message('Checking health endpoint...');
+  const healthStep = await checkHealthEndpoint(ctx);
+  steps.push(healthStep);
+
+  // Unit tests — need to stop spinner for progress bar output
+  let shouldRunTests = ctx.nonInteractive;
+  if (!ctx.nonInteractive) {
+    s.stop('Health check complete');
+    const answer = await confirm({ message: 'Run unit tests?', initialValue: true });
+    shouldRunTests = !isCancel(answer) && answer;
+  }
+
+  if (shouldRunTests) {
+    if (!ctx.nonInteractive) {
+      s.start('Running unit tests...');
+    }
+    s.stop('Running unit tests...');
+    const testStep = await runUnitTests(ctx);
+    steps.push(testStep);
+  } else {
+    s.stop('Verification complete');
+    ctx.results.push({ name: 'Unit tests', status: 'skip', message: 'Skipped by user' });
+    steps.push(subStepSkip('Unit tests', 'Skipped by user'));
+  }
+
+  logSubSteps(steps);
+}
+
+export async function runIntegrationSuite(ctx: SetupContext): Promise<void> {
+  const hasCriticalFails = ctx.results.some(
+    (r) => ['PostgreSQL', 'Redis', 'Database migrations'].includes(r.name) && r.status === 'fail',
+  );
+  if (hasCriticalFails) {
+    log.warn('Skipping integration tests — infrastructure not healthy');
+    ctx.results.push({ name: 'Integration tests', status: 'skip', message: 'Infra not ready' });
+    return;
+  }
+
+  let shouldRun = ctx.nonInteractive;
+  if (!ctx.nonInteractive) {
+    const answer = await confirm({
+      message: 'Run integration tests?',
+      initialValue: true,
+    });
+    shouldRun = !isCancel(answer) && answer;
+  }
+
+  if (!shouldRun) {
+    ctx.results.push({ name: 'Integration tests', status: 'skip', message: 'Skipped by user' });
+    return;
+  }
+
+  const steps: SubStep[] = [];
+
+  const s = spinner();
+  s.start('Running integration tests...');
+  s.stop('Running integration tests...');
+
+  const integrationStep = await runIntegrationTests(ctx);
+  steps.push(integrationStep);
+
+  // Offer live Telegram tests if Telegram is configured
+  if (!ctx.skipTelegram && ctx.envVars.TELEGRAM_BOT_TOKEN && ctx.envVars.TELEGRAM_TEST_CHAT_ID) {
+    let shouldRunLive = ctx.nonInteractive;
+    if (!ctx.nonInteractive) {
+      const answer = await confirm({
+        message: 'Run live Telegram tests? (requires interaction in your Telegram app)',
+        initialValue: true,
+      });
+      shouldRunLive = !isCancel(answer) && answer;
+    }
+
+    if (shouldRunLive) {
+      const liveStep = await runLiveTelegramTests(ctx);
+      steps.push(liveStep);
+    } else {
+      ctx.results.push({ name: 'Live Telegram tests', status: 'skip', message: 'Skipped by user' });
+      steps.push(subStepSkip('Live Telegram tests', 'Skipped by user'));
+    }
+  }
+
+  logSubSteps(steps);
 }

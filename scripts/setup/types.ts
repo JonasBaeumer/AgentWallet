@@ -16,4 +16,6 @@ export interface SetupContext {
   envVars: Record<string, string>;
   skipTelegram: boolean;
   generatedApiKey: string | null;
+  /** Services that were auto-launched during Phase 8 */
+  launchedServices: Set<string>;
 }

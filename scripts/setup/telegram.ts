@@ -1,7 +1,7 @@
-import { log, spinner } from '@clack/prompts';
+import { spinner } from '@clack/prompts';
 import https from 'https';
 import { SetupContext } from './types';
-import { isPlaceholder } from './utils';
+import { isPlaceholder, subStepPass, subStepFail, logSubSteps } from './utils';
 
 function telegramGetMe(token: string): Promise<{ ok: boolean; username?: string }> {
   return new Promise((resolve) => {
@@ -32,8 +32,6 @@ export async function setupTelegram(ctx: SetupContext): Promise<void> {
     return;
   }
 
-  log.info('Validating Telegram bot...');
-
   const token = ctx.envVars.TELEGRAM_BOT_TOKEN;
   if (isPlaceholder(token)) {
     ctx.results.push({ name: 'Telegram', status: 'warn', message: 'No bot token configured' });
@@ -41,27 +39,18 @@ export async function setupTelegram(ctx: SetupContext): Promise<void> {
   }
 
   const s = spinner();
-  s.start('Checking Telegram bot token');
+  s.start('Validating Telegram bot...');
+
+  s.message('Checking bot token...');
   const result = await telegramGetMe(token);
 
   if (result.ok) {
-    s.stop(`Bot @${result.username} is accessible`);
-    ctx.results.push({
-      name: 'Telegram',
-      status: 'pass',
-      message: `@${result.username} verified`,
-    });
-    log.info(
-      'To complete Telegram setup, you still need to:\n' +
-      '  1. Start ngrok: ngrok http 3000\n' +
-      '  2. Register the webhook — see docs/telegram-setup.md step 4',
-    );
+    s.stop('Telegram bot validated');
+    logSubSteps([subStepPass('Bot token', `@${result.username} verified`)]);
+    ctx.results.push({ name: 'Telegram', status: 'pass', message: `@${result.username} verified` });
   } else {
-    s.stop('Telegram bot token is invalid');
-    ctx.results.push({
-      name: 'Telegram',
-      status: 'fail',
-      message: 'Invalid bot token — check TELEGRAM_BOT_TOKEN in .env',
-    });
+    s.stop('Telegram validation failed');
+    logSubSteps([subStepFail('Bot token', 'Invalid — check TELEGRAM_BOT_TOKEN in .env')]);
+    ctx.results.push({ name: 'Telegram', status: 'fail', message: 'Invalid bot token — check TELEGRAM_BOT_TOKEN in .env' });
   }
 }

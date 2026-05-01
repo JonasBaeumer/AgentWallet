@@ -1,58 +1,74 @@
 import { log, note, spinner } from '@clack/prompts';
 import { SetupContext } from './types';
-import { exec } from './utils';
+import { exec, execStreaming, SubStep, subStepPass, subStepFail, logSubSteps } from './utils';
 
 export async function setupDatabase(ctx: SetupContext): Promise<void> {
-  log.info('Setting up database...');
+  const s = spinner();
+  s.start('Setting up database...');
+
+  const steps: SubStep[] = [];
 
   // Prisma generate (always safe to re-run)
-  const s = spinner();
-  s.start('Generating Prisma client');
+  s.message('Generating Prisma client...');
   const generate = exec('npx prisma generate', { timeout: 30_000 });
   if (generate.code !== 0) {
-    s.stop('Prisma generate failed');
-    log.error(generate.stderr);
-    ctx.results.push({ name: 'Prisma generate', status: 'fail', message: generate.stderr });
+    steps.push(subStepFail('Prisma generate', generate.stderr || generate.stdout || 'Unknown error'));
+    ctx.results.push({ name: 'Prisma generate', status: 'fail', message: generate.stderr || generate.stdout });
+    s.stop('Database setup failed');
+    logSubSteps(steps);
     return;
   }
-  s.stop('Prisma client generated');
+  steps.push(subStepPass('Prisma client', 'Generated'));
 
   // Check migration status
-  const status = exec('npx prisma migrate status');
+  s.message('Checking migration status...');
+  const status = exec('npx prisma migrate status 2>&1', { timeout: 30_000 });
   const isUpToDate = status.stdout.includes('Database schema is up to date');
 
   if (isUpToDate) {
-    log.info('Database migrations already up to date');
+    steps.push(subStepPass('Migrations', 'Already up to date'));
     ctx.results.push({ name: 'Database migrations', status: 'pass', message: 'Already up to date' });
   } else {
-    s.start('Running database migrations');
+    s.stop('Running database migrations...');
     const migrateCmd = ctx.nonInteractive ? 'npx prisma migrate deploy' : 'npx prisma migrate dev';
-    const migrate = exec(migrateCmd, { timeout: 60_000 });
+    const migrate = await execStreaming('sh', ['-c', migrateCmd], { timeout: 60_000 });
     if (migrate.code !== 0) {
-      s.stop('Migrations failed');
-      log.error(migrate.stderr);
-      ctx.results.push({ name: 'Database migrations', status: 'fail', message: 'Migration failed — check output above' });
+      const errorOutput = migrate.stderr || migrate.stdout || 'Unknown error — check database connection';
+      log.error(errorOutput);
+      steps.push(subStepFail('Migrations', 'Failed'));
+      ctx.results.push({ name: 'Database migrations', status: 'fail', message: 'Migration failed — see output above' });
+      logSubSteps(steps);
       return;
     }
-    s.stop('Migrations applied');
+    steps.push(subStepPass('Migrations', 'Applied'));
     ctx.results.push({ name: 'Database migrations', status: 'pass', message: 'Applied' });
+    s.start('Setting up database...');
   }
 
   // Seed demo user
-  s.start('Seeding demo user');
+  s.message('Seeding demo user...');
   const seed = exec('npm run seed 2>&1', { timeout: 30_000 });
   if (seed.code !== 0) {
-    s.stop('Seed failed');
-    log.error(seed.stderr || seed.stdout);
+    steps.push(subStepFail('Demo user seed', seed.stderr || seed.stdout || 'Seed script failed'));
     ctx.results.push({ name: 'Demo user seed', status: 'fail', message: 'Seed script failed' });
+    s.stop('Database setup completed with errors');
+    logSubSteps(steps);
     return;
   }
-  s.stop('Demo user seeded');
+  steps.push(subStepPass('Demo user seed', 'demo@agentpay.dev'));
+  ctx.results.push({ name: 'Demo user seed', status: 'pass', message: 'demo@agentpay.dev created' });
 
   // Extract API key from seed output
   const keyMatch = seed.stdout.match(/Demo user API key \(save this\): (.+)/);
   if (keyMatch) {
     ctx.generatedApiKey = keyMatch[1].trim();
+  }
+
+  s.stop('Database setup complete');
+  logSubSteps(steps);
+
+  // Show credentials separately — important enough for a note box
+  if (ctx.generatedApiKey) {
     note(
       `Email:   demo@agentpay.dev\n` +
       `API Key: ${ctx.generatedApiKey}\n\n` +
@@ -61,6 +77,4 @@ export async function setupDatabase(ctx: SetupContext): Promise<void> {
       'Demo User Credentials',
     );
   }
-
-  ctx.results.push({ name: 'Demo user seed', status: 'pass', message: 'demo@agentpay.dev created' });
 }
