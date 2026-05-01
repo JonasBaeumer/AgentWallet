@@ -8,9 +8,12 @@
  *   npm run test:integration -- --testPathPattern=reconciliation
  */
 
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
 import { prisma } from '@/db/client';
 import { reconcileIntent } from '@/payments/providers/stripe/reconciliationService';
+import { getStripeClient } from '@/payments/providers/stripe/stripeClient';
+
+jest.setTimeout(60_000);
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
 const describeIfStripe =
@@ -23,7 +26,8 @@ let userId: string;
 
 describeIfStripe('Reconciliation integration', () => {
   beforeAll(async () => {
-    stripe = new Stripe(STRIPE_KEY!, { apiVersion: '2024-06-20' as Stripe.LatestApiVersion });
+    // Use the singleton so we inherit maxNetworkRetries: 3 (matches prod).
+    stripe = getStripeClient();
 
     // Create minimal DB records
     const user = await prisma.user.create({
@@ -42,6 +46,7 @@ describeIfStripe('Reconciliation integration', () => {
         maxBudget: 5000,
         currency: 'gbp',
         status: 'DONE',
+        idempotencyKey: `recon-test-${Date.now()}`,
       },
     });
     intentId = intent.id;
@@ -79,32 +84,39 @@ describeIfStripe('Reconciliation integration', () => {
       data: { intentId, stripeCardId: cardId, last4: card.last4 },
     });
 
-    // Simulate a capture
-    const auth = await stripe.testHelpers.issuing.authorizations.create({
+    // Stripe test mode: freshly created individual cardholders need ~2-3s for
+    // their verification state to settle before authorizations are approved.
+    await new Promise((r) => setTimeout(r, 3000));
+
+    // Force-capture bypasses the real-time authorization webhook, so it works
+    // regardless of whether a stripe listen listener is running or not.
+    await stripe.testHelpers.issuing.transactions.createForceCapture({
       card: cardId,
       amount: 3500,
       currency: 'eur',
       merchant_data: { name: 'Test Merchant' },
     });
-    await stripe.testHelpers.issuing.authorizations.capture(auth.id);
 
     // Cancel the card (mirrors what the system does post-checkout)
     await stripe.issuing.cards.update(cardId, { status: 'canceled' });
 
     // Write matching ledger records
     await prisma.pot.create({
-      data: { intentId, reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' },
+      data: { userId, intentId, reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' },
     });
     await prisma.ledgerEntry.create({
-      data: { intentId, type: 'RESERVE', amount: 5000 },
+      data: { userId, intentId, type: 'RESERVE', amount: 5000 },
     });
     await prisma.ledgerEntry.create({
-      data: { intentId, type: 'SETTLE', amount: 3500 },
+      data: { userId, intentId, type: 'SETTLE', amount: 3500 },
     });
   }, 60_000);
 
   afterAll(async () => {
-    // Clean up DB records (cascade delete via purchaseIntent)
+    // Delete in FK-dependency order: virtualCard/ledger/pot -> intent -> user
+    await prisma.virtualCard.deleteMany({ where: { intentId } }).catch(() => {});
+    await prisma.ledgerEntry.deleteMany({ where: { intentId } }).catch(() => {});
+    await prisma.pot.deleteMany({ where: { intentId } }).catch(() => {});
     await prisma.purchaseIntent.delete({ where: { id: intentId } }).catch(() => {});
     await prisma.user.delete({ where: { id: userId } }).catch(() => {});
     await prisma.$disconnect();

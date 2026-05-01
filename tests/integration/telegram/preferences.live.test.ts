@@ -86,7 +86,15 @@ let originalWebhookUrl = '';
 async function disableWebhook() {
   const info = await tgGet('getWebhookInfo');
   originalWebhookUrl = info.result?.url ?? '';
-  await tgPost('deleteWebhook', { drop_pending_updates: false });
+  const delResult = await tgPost('deleteWebhook', { drop_pending_updates: false });
+  if (!delResult.ok) {
+    throw new Error(`deleteWebhook failed: ${delResult.description}`);
+  }
+  // Verify webhook is actually gone — getUpdates must work
+  const verify = await tgGet('getWebhookInfo');
+  if (verify.result?.url) {
+    throw new Error(`Webhook still active after deletion: ${verify.result.url}`);
+  }
 }
 
 async function restoreWebhook() {
@@ -118,7 +126,7 @@ async function waitForCallback(
     const result = await tgGet('getUpdates', {
       offset: updateOffset,
       timeout: pollSecs,
-      allowed_updates: 'callback_query',
+      allowed_updates: JSON.stringify(['callback_query']),
     });
 
     if (!result.ok) {
@@ -143,6 +151,9 @@ async function waitForCallback(
       const matches = allowed.some((a) => (a.includes(':') ? cb.data === a : action === a));
 
       if (matches) {
+        // Answer immediately to dismiss the loading spinner — don't rely on the
+        // fire-and-forget app handler which may be too slow or fail silently.
+        await tgPost('answerCallbackQuery', { callback_query_id: cb.id });
         return {
           action,
           payload,

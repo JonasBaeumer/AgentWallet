@@ -25,7 +25,10 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
     type: 'capture',
   });
 
-  const totalCaptured = txList.data.reduce((sum, t) => sum + t.amount, 0);
+  // Stripe Issuing transactions have negative amounts for captures (debits from
+  // the Issuing balance). Use Math.abs so we can compare against our positive
+  // settledAmount.
+  const totalCaptured = Math.abs(txList.data.reduce((sum, t) => sum + t.amount, 0));
   const stripeReport = {
     cardStatus: stripeCard.status,
     transactions: txList.data.map((t) => ({ id: t.id, amount: t.amount, type: t.type })),
