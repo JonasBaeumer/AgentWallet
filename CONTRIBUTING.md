@@ -63,3 +63,4 @@ The integration test job runs without a real Stripe key — Stripe calls are ski
 - [ ] `npx tsc --noEmit` passes
 - [ ] `npm test` passes
 - [ ] New behaviour is covered by tests
+- [ ] If routes in [`src/api/routes/`](src/api/routes) or schemas in [`src/api/validators/`](src/api/validators) changed, [`docs/api.md`](docs/api.md) is updated in the same PR to stay in sync (and with any OpenAPI spec once it lands).
