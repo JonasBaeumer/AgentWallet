@@ -7,6 +7,18 @@ jest.mock('@/db/client', () => ({
   },
 }));
 
+// Mock logger so we can assert observability calls (issue #90 — the main
+// contract of these fixes is restored visibility, not just resolved promises).
+const mockChildLogger = {
+  error: jest.fn(),
+  warn: jest.fn(),
+  info: jest.fn(),
+  debug: jest.fn(),
+};
+jest.mock('@/config/logger', () => ({
+  logger: { child: jest.fn(() => mockChildLogger) },
+}));
+
 // Mock Telegram bot
 const mockSendMessage = jest.fn().mockResolvedValue({ message_id: 99 });
 const mockEditMessageText = jest.fn().mockResolvedValue({});
@@ -74,6 +86,8 @@ beforeEach(() => {
   mockFreezeCard.mockResolvedValue(undefined);
   mockSetPrefSession.mockResolvedValue(undefined);
   (mockPrisma.user.update as jest.Mock).mockResolvedValue({});
+  mockChildLogger.error.mockClear();
+  mockChildLogger.warn.mockClear();
 });
 
 // ── sendMainMenu ──────────────────────────────────────────────────────────────
@@ -598,7 +612,7 @@ describe('unknown menu_ action', () => {
 // ── observability fixes (issue #90) ───────────────────────────────────────────
 
 describe('editMenu error handling (issue #90 bug 2)', () => {
-  it('swallows the benign "message is not modified" 400 error from Telegram', async () => {
+  it('swallows the benign "message is not modified" 400 error from Telegram without logging', async () => {
     (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
     (mockPrisma.pot.findMany as jest.Mock).mockResolvedValue([]);
     mockEditMessageText.mockRejectedValueOnce({
@@ -616,9 +630,11 @@ describe('editMenu error handling (issue #90 bug 2)', () => {
         fromId,
       ),
     ).resolves.toBeUndefined();
+
+    expect(mockChildLogger.error).not.toHaveBeenCalled();
   });
 
-  it('surfaces a fallback error message when a non-benign Telegram error is raised', async () => {
+  it('logs and surfaces a fallback error message when a non-benign Telegram error is raised', async () => {
     (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
     (mockPrisma.pot.findMany as jest.Mock).mockResolvedValue([]);
     // First edit (showBalance) fails with a real error → outer catch fires.
@@ -641,6 +657,15 @@ describe('editMenu error handling (issue #90 bug 2)', () => {
     expect(mockEditMessageText).toHaveBeenCalledTimes(2);
     const fallbackText = mockEditMessageText.mock.calls[1][2] as string;
     expect(fallbackText.toLowerCase()).toContain('went wrong');
+    // Two error log lines: editMenu's own + the outer handler's recovery log.
+    expect(mockChildLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId, messageId }),
+      expect.stringContaining('Failed to edit Telegram menu'),
+    );
+    expect(mockChildLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId, action: 'menu_balance' }),
+      expect.stringContaining('menu callback handler failed'),
+    );
   });
 
   it('does not throw when both the primary edit and the fallback edit fail', async () => {
@@ -658,6 +683,96 @@ describe('editMenu error handling (issue #90 bug 2)', () => {
         fromId,
       ),
     ).resolves.toBeUndefined();
+
+    expect(mockChildLogger.error).toHaveBeenCalled();
+  });
+});
+
+describe('mutation/notification split in cancel handlers (issue #90, review feedback)', () => {
+  it('does NOT show "Something went wrong" when expireIntent succeeds but the confirmation edit fails', async () => {
+    mockExpireIntent.mockResolvedValue({ status: 'EXPIRED' });
+    // The single editMessageText call (the success confirmation) fails with a
+    // non-benign Telegram error. The user must NOT see a fallback that invites
+    // a retry on an already-cancelled intent.
+    mockEditMessageText.mockRejectedValue({ error_code: 429, description: 'Too Many Requests' });
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_cancel_do',
+        'intent-abc',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+
+    // Only the success confirmation was attempted — no second "went wrong" edit.
+    expect(mockEditMessageText).toHaveBeenCalledTimes(1);
+    const onlyText = mockEditMessageText.mock.calls[0][2] as string;
+    expect(onlyText.toLowerCase()).not.toContain('went wrong');
+    expect(onlyText.toLowerCase()).toContain('cancelled');
+
+    // The Telegram failure is logged so operators see it, but
+    // doCancelIntent itself is NOT logged as a failure.
+    expect(mockChildLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId, messageId }),
+      expect.stringContaining('Failed to edit Telegram menu'),
+    );
+    const expireFailureLogged = mockChildLogger.error.mock.calls.some((call) =>
+      String(call[1]).includes('expireIntent failed'),
+    );
+    expect(expireFailureLogged).toBe(false);
+  });
+
+  it('does NOT show "Something went wrong" when cancelCard succeeds but the confirmation edit fails', async () => {
+    mockCancelCard.mockResolvedValue(undefined);
+    mockEditMessageText.mockRejectedValue({ error_code: 403, description: 'Bot blocked by user' });
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_card_cancel',
+        'intent-abc',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(mockEditMessageText).toHaveBeenCalledTimes(1);
+    const onlyText = mockEditMessageText.mock.calls[0][2] as string;
+    expect(onlyText.toLowerCase()).not.toContain('went wrong');
+    expect(onlyText.toLowerCase()).toContain('cancelled');
+
+    const cancelCardFailureLogged = mockChildLogger.error.mock.calls.some((call) =>
+      String(call[1]).includes('cancelCard failed'),
+    );
+    expect(cancelCardFailureLogged).toBe(false);
+  });
+});
+
+describe('outer recovery catches user-lookup failures (issue #90, review feedback)', () => {
+  it('catches a getUserByChatId DB failure inside the outer recovery block', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockRejectedValue(new Error('db unavailable'));
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_balance',
+        '_',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+
+    const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
+    expect(text.toLowerCase()).toContain('went wrong');
+    expect(mockChildLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId, action: 'menu_balance' }),
+      expect.stringContaining('menu callback handler failed'),
+    );
   });
 });
 
@@ -686,6 +801,10 @@ describe('TTL payload validation (issue #90 bug 3)', () => {
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
     const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
     expect(text.toLowerCase()).toContain('invalid ttl');
+    expect(mockChildLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId, action: 'menu_pref_ttl', payload }),
+      expect.stringContaining('Rejected out-of-range TTL'),
+    );
   });
 
   it.each([
@@ -728,11 +847,41 @@ describe('cancel-policy payload validation (issue #90 bug 3, hardening)', () => 
     expect(mockPrisma.user.update).not.toHaveBeenCalled();
     const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
     expect(text.toLowerCase()).toContain('invalid cancel policy');
+    expect(mockChildLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId,
+        action: 'menu_pref_policy',
+        payload: 'NOT_A_REAL_POLICY',
+      }),
+      expect.stringContaining('Rejected unknown cancel policy'),
+    );
+  });
+
+  it('logs a warning for an unknown menu_* action', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId,
+      messageId,
+      'menu_unknown_action',
+      'whatever',
+      fromId,
+    );
+
+    expect(mockChildLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId,
+        action: 'menu_unknown_action',
+        payload: 'whatever',
+      }),
+      expect.stringContaining('Unknown menu_* callback action'),
+    );
   });
 });
 
 describe('error logging in cancel handlers (issue #90 bug 1)', () => {
-  it('does not rethrow when expireIntent fails (doCancelIntent)', async () => {
+  it('does not rethrow when expireIntent fails (doCancelIntent) and logs the failure', async () => {
     mockExpireIntent.mockRejectedValue(new Error('boom'));
 
     await expect(
@@ -747,9 +896,17 @@ describe('error logging in cancel handlers (issue #90 bug 1)', () => {
     ).resolves.toBeUndefined();
     const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
     expect(text.toLowerCase()).toContain('went wrong');
+    expect(mockChildLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId,
+        intentId: 'intent-abc',
+        err: expect.any(Error),
+      }),
+      expect.stringContaining('expireIntent failed'),
+    );
   });
 
-  it('does not rethrow when cancelCard fails (doCancelCard)', async () => {
+  it('does not rethrow when cancelCard fails (doCancelCard) and logs the failure', async () => {
     mockCancelCard.mockRejectedValue(new Error('stripe down'));
 
     await expect(
@@ -764,9 +921,17 @@ describe('error logging in cancel handlers (issue #90 bug 1)', () => {
     ).resolves.toBeUndefined();
     const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
     expect(text.toLowerCase()).toContain('went wrong');
+    expect(mockChildLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId,
+        intentId: 'intent-abc',
+        err: expect.any(Error),
+      }),
+      expect.stringContaining('cancelCard failed'),
+    );
   });
 
-  it('does not rethrow when an inner show* handler fails (outer catch)', async () => {
+  it('does not rethrow when an inner show* handler fails (outer catch) and logs the failure', async () => {
     (mockPrisma.pot.findMany as jest.Mock).mockRejectedValue(new Error('db unavailable'));
 
     await expect(
@@ -781,5 +946,13 @@ describe('error logging in cancel handlers (issue #90 bug 1)', () => {
     ).resolves.toBeUndefined();
     const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
     expect(text.toLowerCase()).toContain('went wrong');
+    expect(mockChildLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId,
+        action: 'menu_balance',
+        err: expect.any(Error),
+      }),
+      expect.stringContaining('menu callback handler failed'),
+    );
   });
 });
