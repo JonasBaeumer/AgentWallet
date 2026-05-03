@@ -102,10 +102,22 @@ describe('User AFTER_TTL ↔ cardTtlMinutes CHECK constraint', () => {
         }),
       );
     });
+
+    it('rejects create with AFTER_TTL and cardTtlMinutes set to 0', async () => {
+      await expectConstraintViolation(
+        prisma.user.create({
+          data: {
+            email: `after-ttl-create-zero-${Date.now()}@test.local`,
+            cancelPolicy: CardCancelPolicy.AFTER_TTL,
+            cardTtlMinutes: 0,
+          },
+        }),
+      );
+    });
   });
 
   describe('accepts valid states', () => {
-    it('allows AFTER_TTL with positive cardTtlMinutes', async () => {
+
       const user = await createUser({
         cancelPolicy: CardCancelPolicy.AFTER_TTL,
         cardTtlMinutes: 30,
