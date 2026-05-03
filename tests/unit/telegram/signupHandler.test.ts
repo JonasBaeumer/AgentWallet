@@ -185,7 +185,6 @@ describe('email step handling', () => {
     step: 'awaiting_email' as const,
     agentId: 'ag_test',
     pairingCode: 'ABCD1234',
-    paymentProvider: 'STRIPE' as const,
   };
 
   it('creates user and marks code claimed on valid email', async () => {
@@ -212,7 +211,6 @@ describe('email step handling', () => {
           mainBalance: 1_000_000,
           maxBudgetPerIntent: 50000,
           apiKeyHash: expect.any(String),
-          paymentProvider: 'STRIPE',
         }),
       }),
     );

@@ -161,7 +161,7 @@ describe('handleTelegramCallback — link_confirm', () => {
     expect(mockSetSession).toHaveBeenCalledWith(
       12345678,
       expect.objectContaining({
-        step: 'awaiting_provider',
+        step: 'awaiting_email',
         agentId: 'ag_test',
         pairingCode: 'ABCD1234',
       }),
@@ -169,27 +169,8 @@ describe('handleTelegramCallback — link_confirm', () => {
     expect(mockEditMessageText).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.stringContaining('payment provider'),
+      expect.stringContaining('email'),
       expect.any(Object),
-    );
-  });
-
-  it('advances to awaiting_email when provider is chosen', async () => {
-    const session = {
-      step: 'awaiting_provider' as const,
-      agentId: 'ag_test',
-      pairingCode: 'ABCD1234',
-    };
-    mockGetSession.mockResolvedValue(session);
-
-    await handleTelegramCallback(makeUpdate('signup_provider', 'PRIVACY_COM', 'cb-sp1', 12345678));
-
-    expect(mockSetSession).toHaveBeenCalledWith(
-      12345678,
-      expect.objectContaining({
-        step: 'awaiting_email',
-        paymentProvider: 'PRIVACY_COM',
-      }),
     );
   });
 

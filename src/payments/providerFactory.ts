@@ -28,12 +28,6 @@ export function getPaymentProvider(providerType: PaymentProvider): IPaymentProvi
         instance = new StripePaymentProvider();
         break;
       }
-      case PaymentProvider.PRIVACY_COM: {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { PrivacyComPaymentProvider } = require('./providers/privacy');
-        instance = new PrivacyComPaymentProvider();
-        break;
-      }
       default:
         throw new Error(`Unsupported payment provider: ${providerType}`);
     }

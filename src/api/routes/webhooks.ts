@@ -1,12 +1,11 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { env } from '@/config/env';
 import { getPaymentProvider } from '@/payments';
 import { PaymentProvider } from '@/contracts';
 
 export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
-  // Each provider gets its own webhook route because signature schemes are provider-specific.
-  // Raw body preservation is configured in app.ts for these paths (required for HMAC verification).
-
+  // Raw body is preserved for this path by app's content-type parser (required for Stripe signature verification).
+  // The route hardcodes PaymentProvider.STRIPE because each provider has its own webhook path
+  // with provider-specific signature schemes (Privacy.com will add /v1/webhooks/privacy in #106).
   fastify.post(
     '/v1/webhooks/stripe',
     {
@@ -39,39 +38,6 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       // Stripe requires the Stripe-Version header in responses to issuing_authorization.request.
       // Without it Stripe reports "Invalid Stripe API version: " and declines the authorization.
       return reply.header('Stripe-Version', '2024-06-20').send(response);
-    },
-  );
-
-  fastify.post(
-    '/v1/webhooks/privacy',
-    {
-      config: {
-        rateLimit: {
-          max: 500,
-          timeWindow: '1 minute',
-          keyGenerator: (req: FastifyRequest) => req.ip ?? 'unknown',
-        },
-      },
-    },
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const signatureHeader = env.PRIVACY_WEBHOOK_SIGNATURE_HEADER;
-      const signature = request.headers[signatureHeader] as string | undefined;
-      if (!signature) {
-        return reply.status(400).send({ error: `Missing ${signatureHeader} header` });
-      }
-
-      let response: Record<string, unknown> = { received: true };
-      try {
-        const body = request.body as Buffer | string;
-        response = await getPaymentProvider(PaymentProvider.PRIVACY_COM).handleWebhookEvent(
-          body,
-          signature,
-        );
-      } catch (err) {
-        fastify.log.error({ message: 'Privacy.com webhook processing error', error: String(err) });
-      }
-
-      return reply.send(response);
     },
   );
 }

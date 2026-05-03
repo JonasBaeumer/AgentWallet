@@ -12,11 +12,6 @@ export const env = {
   REDIS_URL: requireEnv('REDIS_URL'),
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder',
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || 'whsec_placeholder',
-  PRIVACY_API_KEY: process.env.PRIVACY_API_KEY || 'privacy_test_placeholder',
-  PRIVACY_API_BASE_URL: process.env.PRIVACY_API_BASE_URL || 'https://api.privacy.com/v1',
-  PRIVACY_WEBHOOK_SECRET: process.env.PRIVACY_WEBHOOK_SECRET || 'privacy_whsec_placeholder',
-  PRIVACY_WEBHOOK_SIGNATURE_HEADER:
-    process.env.PRIVACY_WEBHOOK_SIGNATURE_HEADER || 'x-privacy-signature',
   WORKER_API_KEY: requireEnv('WORKER_API_KEY'),
   PORT: parseInt(process.env.PORT || '3000', 10),
   NODE_ENV: process.env.NODE_ENV || 'development',

@@ -31,13 +31,10 @@ describe('StripePaymentProvider', () => {
   });
 
   describe('metadata', () => {
-    it('exposes Stripe provider metadata with EUR currency + per-transaction auth', () => {
-      expect(provider.metadata).toMatchObject({
+    it('exposes Stripe provider metadata with EUR currency', () => {
+      expect(provider.metadata).toEqual({
         id: PaymentProvider.STRIPE,
         currency: 'eur',
-        authorizationModel: 'per_transaction',
-        autoCancelAfterUse: false,
-        supportsFreeze: true,
       });
     });
   });
