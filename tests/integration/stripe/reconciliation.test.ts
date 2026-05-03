@@ -84,6 +84,10 @@ describeIfStripe('Reconciliation integration', () => {
       },
     });
 
+    // Simulate a captured transaction. We use createForceCapture (rather than
+    // create+capture on an authorization) because the latter requires the
+    // authorization to first be approved and pending — which in turn needs a
+    // running webhook approver. Force-capture lets the test stay self-contained.
     await stripe.testHelpers.issuing.transactions.createForceCapture({
       card: cardId,
       amount: 3500,
@@ -111,6 +115,9 @@ describeIfStripe('Reconciliation integration', () => {
   }, 60_000);
 
   afterAll(async () => {
+    // Clean up DB records in FK dependency order. The schema doesn't define
+    // ON DELETE CASCADE, so each child table must be cleared explicitly.
+    if (!intentId || !userId) return;
     await prisma.ledgerEntry.deleteMany({ where: { intentId } }).catch(() => {});
     await prisma.pot.deleteMany({ where: { intentId } }).catch(() => {});
     await prisma.virtualCard.deleteMany({ where: { intentId } }).catch(() => {});
