@@ -5,6 +5,7 @@ import {
   PotData,
   InsufficientFundsError,
   IntentNotFoundError,
+  UserNotFoundError,
 } from '@/contracts';
 import { logger } from '@/config/logger';
 
@@ -17,14 +18,17 @@ export async function reserveForIntent(
 ): Promise<PotData> {
   log.info({ intentId, userId, amount }, 'Reserving funds');
   return await prisma.$transaction(async (tx) => {
+    // Fetch userId alongside currency so we can verify the intent belongs to
+    // the caller. Without this check a mismatched (userId, intentId) pair
+    // would attach this user's pot/ledger entries to another user's intent.
     const intent = await tx.purchaseIntent.findUnique({
       where: { id: intentId },
-      select: { currency: true },
+      select: { currency: true, userId: true },
     });
-    if (!intent) throw new IntentNotFoundError(intentId);
+    if (!intent || intent.userId !== userId) throw new IntentNotFoundError(intentId);
 
     const user = await tx.user.findUnique({ where: { id: userId } });
-    if (!user) throw new Error(`User not found: ${userId}`);
+    if (!user) throw new UserNotFoundError(userId);
     if (user.mainBalance < amount) throw new InsufficientFundsError(user.mainBalance, amount);
 
     // Deduct from mainBalance

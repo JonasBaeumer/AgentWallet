@@ -1,4 +1,4 @@
-import { PaymentProvider, IntentNotFoundError } from '@/contracts';
+import { PaymentProvider, IntentNotFoundError, UserNotFoundError } from '@/contracts';
 import { Prisma } from '@prisma/client';
 
 jest.mock('@/db/client', () => ({
@@ -133,7 +133,7 @@ describe('providerFactory — getProviderForUser / getProviderForIntent', () => 
       expect(provider.metadata.id).toBe(PaymentProvider.STRIPE);
     });
 
-    it('translates Prisma P2025 into IntentNotFoundError', async () => {
+    it('translates Prisma P2025 into UserNotFoundError', async () => {
       (prisma.user.findUniqueOrThrow as jest.Mock).mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('no record', {
           code: 'P2025',
@@ -141,7 +141,7 @@ describe('providerFactory — getProviderForUser / getProviderForIntent', () => 
         }),
       );
 
-      await expect(getProviderForUser('missing-user')).rejects.toThrow(IntentNotFoundError);
+      await expect(getProviderForUser('missing-user')).rejects.toThrow(UserNotFoundError);
     });
 
     it('rethrows non-P2025 errors unchanged', async () => {

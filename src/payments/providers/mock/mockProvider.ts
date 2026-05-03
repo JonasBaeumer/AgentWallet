@@ -9,15 +9,16 @@ import {
 
 type CallRecord = { method: string; args: unknown[]; timestamp: number };
 
-const METADATA: ProviderMetadata = {
-  id: PaymentProvider.STRIPE,
-  currency: 'eur',
-};
-
 export class MockPaymentProvider implements IPaymentProvider {
-  readonly metadata = METADATA;
+  readonly metadata: ProviderMetadata;
   private calls: CallRecord[] = [];
   private issuingBalance = 999_999_99;
+
+  // Reflect the requested provider type so callers branching on
+  // provider.metadata.id see the id they asked for in tests.
+  constructor(providerType: PaymentProvider = PaymentProvider.STRIPE) {
+    this.metadata = { id: providerType, currency: 'eur' };
+  }
 
   getCalls(): CallRecord[] {
     return [...this.calls];

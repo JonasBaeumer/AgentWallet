@@ -98,10 +98,17 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
         await returnIntent(intentId);
       }
 
-      // Cancel the virtual card — one purchase, one card (best-effort)
+      // Cancel the virtual card — one purchase, one card (best-effort).
+      // Failures must not block the agent response, but a swallowed error can
+      // leave a live card on Stripe — log so it shows up in oncall.
       await getProviderForIntent(intentId)
         .then((p) => p.cancelCard(intentId))
-        .catch(() => {});
+        .catch((err: unknown) => {
+          fastify.log.warn(
+            { intentId, err },
+            'Failed to cancel virtual card after agent result',
+          );
+        });
 
       // Store receipt/error info in metadata
       await prisma.purchaseIntent.update({

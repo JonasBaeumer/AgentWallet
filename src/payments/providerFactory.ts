@@ -1,9 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { env } from '@/config/env';
 import { prisma } from '@/db/client';
-import { IPaymentProvider, IntentNotFoundError, PaymentProvider } from '@/contracts';
+import {
+  IPaymentProvider,
+  IntentNotFoundError,
+  PaymentProvider,
+  UserNotFoundError,
+} from '@/contracts';
 
-const MOCK_KEY = '__mock__';
+const MOCK_PREFIX = '__mock__:';
 const instances = new Map<string, IPaymentProvider>();
 
 function useMockProvider(): boolean {
@@ -11,7 +16,10 @@ function useMockProvider(): boolean {
 }
 
 export function getPaymentProvider(providerType: PaymentProvider): IPaymentProvider {
-  const cacheKey = useMockProvider() ? MOCK_KEY : providerType;
+  // Mock instances are cached per-providerType so callers branching on
+  // provider.metadata see the id they asked for, not whichever provider
+  // happened to be requested first.
+  const cacheKey = useMockProvider() ? `${MOCK_PREFIX}${providerType}` : providerType;
   const cached = instances.get(cacheKey);
   if (cached) return cached;
 
@@ -19,7 +27,7 @@ export function getPaymentProvider(providerType: PaymentProvider): IPaymentProvi
   if (useMockProvider()) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { MockPaymentProvider } = require('./providers/mock/mockProvider');
-    instance = new MockPaymentProvider();
+    instance = new MockPaymentProvider(providerType);
   } else {
     switch (providerType) {
       case PaymentProvider.STRIPE: {
@@ -54,7 +62,7 @@ export async function getProviderForUser(userId: string): Promise<IPaymentProvid
     });
     return getPaymentProvider(user.paymentProvider);
   } catch (err) {
-    if (isMissingRecord(err)) throw new IntentNotFoundError(userId);
+    if (isMissingRecord(err)) throw new UserNotFoundError(userId);
     throw err;
   }
 }

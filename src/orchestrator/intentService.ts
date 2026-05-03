@@ -113,8 +113,18 @@ async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
     await provider.cancelCard(intentId).catch((err) => {
       log.error({ intentId, err }, 'IMMEDIATE card cancel failed');
     });
-  } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes) {
-    await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
+  } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes != null) {
+    // cardTtlMinutes <= 0 means cancel immediately rather than enqueueing a
+    // 0-delay job (avoids a queue round-trip and a job that races the
+    // checkout response). Truthy check would treat 0 as "unset" and silently
+    // leave the card live.
+    if (cardTtlMinutes <= 0) {
+      await provider.cancelCard(intentId).catch((err) => {
+        log.error({ intentId, err }, 'AFTER_TTL immediate card cancel failed');
+      });
+    } else {
+      await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
+    }
   } else if (cancelPolicy === 'MANUAL') {
     await provider.freezeCard(intentId).catch((err) => {
       log.error({ intentId, err }, 'MANUAL card freeze failed');
