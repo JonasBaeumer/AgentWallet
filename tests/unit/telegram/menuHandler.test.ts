@@ -594,3 +594,192 @@ describe('unknown menu_ action', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+// ── observability fixes (issue #90) ───────────────────────────────────────────
+
+describe('editMenu error handling (issue #90 bug 2)', () => {
+  it('swallows the benign "message is not modified" 400 error from Telegram', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+    (mockPrisma.pot.findMany as jest.Mock).mockResolvedValue([]);
+    mockEditMessageText.mockRejectedValueOnce({
+      error_code: 400,
+      description: 'Bad Request: message is not modified',
+    });
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_balance',
+        '_',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('surfaces a fallback error message when a non-benign Telegram error is raised', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+    (mockPrisma.pot.findMany as jest.Mock).mockResolvedValue([]);
+    // First edit (showBalance) fails with a real error → outer catch fires.
+    // Second edit (the "Something went wrong" surface) must succeed.
+    mockEditMessageText
+      .mockRejectedValueOnce({ error_code: 429, description: 'Too Many Requests' })
+      .mockResolvedValueOnce({});
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_balance',
+        '_',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(mockEditMessageText).toHaveBeenCalledTimes(2);
+    const fallbackText = mockEditMessageText.mock.calls[1][2] as string;
+    expect(fallbackText.toLowerCase()).toContain('went wrong');
+  });
+
+  it('does not throw when both the primary edit and the fallback edit fail', async () => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+    (mockPrisma.pot.findMany as jest.Mock).mockResolvedValue([]);
+    mockEditMessageText.mockRejectedValue({ error_code: 403, description: 'Bot blocked by user' });
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_balance',
+        '_',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('TTL payload validation (issue #90 bug 3)', () => {
+  beforeEach(() => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+  });
+
+  it.each([
+    ['negative', '-1'],
+    ['zero', '0'],
+    ['too large', '99999'],
+    ['non-numeric', 'abc'],
+    ['empty', ''],
+    ['fractional', '12.5'],
+  ])('rejects %s TTL payload without writing to the DB', async (_label, payload) => {
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId,
+      messageId,
+      'menu_pref_ttl',
+      payload,
+      fromId,
+    );
+
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
+    expect(text.toLowerCase()).toContain('invalid ttl');
+  });
+
+  it.each([
+    ['lower bound', '1', 1],
+    ['preset', '60', 60],
+    ['upper bound', '10080', 10080],
+  ])('accepts %s TTL payload (%s) and writes %s to the DB', async (_label, payload, expected) => {
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId,
+      messageId,
+      'menu_pref_ttl',
+      payload,
+      fromId,
+    );
+
+    expect(mockPrisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { cancelPolicy: 'AFTER_TTL', cardTtlMinutes: expected },
+      }),
+    );
+  });
+});
+
+describe('cancel-policy payload validation (issue #90 bug 3, hardening)', () => {
+  beforeEach(() => {
+    (mockPrisma.user.findFirst as jest.Mock).mockResolvedValue(baseUser);
+  });
+
+  it('rejects an unknown cancel-policy payload without writing to the DB', async () => {
+    await handleMenuCallback(
+      { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+      chatId,
+      messageId,
+      'menu_pref_policy',
+      'NOT_A_REAL_POLICY',
+      fromId,
+    );
+
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
+    expect(text.toLowerCase()).toContain('invalid cancel policy');
+  });
+});
+
+describe('error logging in cancel handlers (issue #90 bug 1)', () => {
+  it('does not rethrow when expireIntent fails (doCancelIntent)', async () => {
+    mockExpireIntent.mockRejectedValue(new Error('boom'));
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_cancel_do',
+        'intent-abc',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+    const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
+    expect(text.toLowerCase()).toContain('went wrong');
+  });
+
+  it('does not rethrow when cancelCard fails (doCancelCard)', async () => {
+    mockCancelCard.mockRejectedValue(new Error('stripe down'));
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_card_cancel',
+        'intent-abc',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+    const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
+    expect(text.toLowerCase()).toContain('went wrong');
+  });
+
+  it('does not rethrow when an inner show* handler fails (outer catch)', async () => {
+    (mockPrisma.pot.findMany as jest.Mock).mockRejectedValue(new Error('db unavailable'));
+
+    await expect(
+      handleMenuCallback(
+        { api: { sendMessage: mockSendMessage, editMessageText: mockEditMessageText } } as any,
+        chatId,
+        messageId,
+        'menu_balance',
+        '_',
+        fromId,
+      ),
+    ).resolves.toBeUndefined();
+    const text = mockEditMessageText.mock.calls.at(-1)?.[2] as string;
+    expect(text.toLowerCase()).toContain('went wrong');
+  });
+});

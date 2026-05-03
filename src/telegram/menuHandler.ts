@@ -5,6 +5,15 @@ import { expireIntent } from '@/orchestrator/intentService';
 import { getProviderForIntent } from '@/payments';
 import { IntentStatus, CardCancelPolicy } from '@/contracts';
 import { setPrefSession } from './sessionStore';
+import { logger } from '@/config/logger';
+
+const log = logger.child({ module: 'telegram/menuHandler' });
+
+// Mirrors the API-level Zod bounds for cardTtlMinutes (src/api/routes/users.ts).
+// Telegram callback payloads can be forged, so the same range is enforced here
+// before any DB write.
+const TTL_MIN_MINUTES = 1;
+const TTL_MAX_MINUTES = 10080;
 
 const POLICY_LABELS: Record<CardCancelPolicy, string> = {
   [CardCancelPolicy.ON_TRANSACTION]: 'On Transaction',
@@ -12,6 +21,19 @@ const POLICY_LABELS: Record<CardCancelPolicy, string> = {
   [CardCancelPolicy.AFTER_TTL]: 'After TTL',
   [CardCancelPolicy.MANUAL]: 'Manual',
 };
+
+function isMessageNotModifiedError(err: unknown): boolean {
+  // grammy surfaces Telegram API errors with shape { error_code, description }.
+  // The 400 "message is not modified" response fires whenever editMessageText is
+  // called with text + markup identical to what is already shown — benign.
+  if (typeof err !== 'object' || err === null) return false;
+  const e = err as { error_code?: number; description?: unknown };
+  return (
+    e.error_code === 400 &&
+    typeof e.description === 'string' &&
+    e.description.includes('message is not modified')
+  );
+}
 
 const ACTIVE_INTENT_STATUSES: IntentStatus[] = [
   IntentStatus.RECEIVED,
@@ -49,12 +71,39 @@ async function editMenu(
   text: string,
   keyboard?: InlineKeyboard,
 ): Promise<void> {
-  await bot.api
-    .editMessageText(chatId, messageId, text, {
+  try {
+    await bot.api.editMessageText(chatId, messageId, text, {
       parse_mode: 'HTML',
       reply_markup: keyboard,
-    })
-    .catch(() => {});
+    });
+  } catch (err) {
+    if (isMessageNotModifiedError(err)) return;
+    log.error(
+      { chatId, messageId, err },
+      'Failed to edit Telegram menu message',
+    );
+    throw err;
+  }
+}
+
+// Best-effort surface used by error paths. We've already logged the underlying
+// failure at the call site; if Telegram itself is unreachable here too, swallow
+// the secondary error so the handler can complete.
+async function editMenuSafe(
+  bot: ReturnType<typeof getTelegramBot>,
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  keyboard?: InlineKeyboard,
+): Promise<void> {
+  try {
+    await editMenu(bot, chatId, messageId, text, keyboard);
+  } catch (err) {
+    log.error(
+      { chatId, messageId, err },
+      'Failed to surface error to user via Telegram',
+    );
+  }
 }
 
 async function showBalance(
@@ -180,9 +229,16 @@ async function doCancelIntent(
       '✅ Intent cancelled. Your budget has been returned.',
       keyboard,
     );
-  } catch {
+  } catch (err) {
+    log.error({ chatId, intentId, err }, 'doCancelIntent failed');
     const keyboard = new InlineKeyboard().text('⬅️ Back', 'menu_main:_');
-    await editMenu(bot, chatId, messageId, '⚠️ Something went wrong. Please try again.', keyboard);
+    await editMenuSafe(
+      bot,
+      chatId,
+      messageId,
+      '⚠️ Something went wrong. Please try again.',
+      keyboard,
+    );
   }
 }
 
@@ -325,9 +381,10 @@ async function doCancelCard(
     await provider.cancelCard(intentId);
     const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
     await editMenu(bot, chatId, messageId, '✅ Card cancelled successfully.', keyboard);
-  } catch {
+  } catch (err) {
+    log.error({ chatId, intentId, err }, 'doCancelCard failed');
     const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
-    await editMenu(
+    await editMenuSafe(
       bot,
       chatId,
       messageId,
@@ -419,6 +476,16 @@ export async function handleMenuCallback(
     } else if (action === 'menu_preferences') {
       await showPreferences(bot, chatId, messageId, user);
     } else if (action === 'menu_pref_policy') {
+      // Callback payloads can be forged — validate against the enum before use.
+      const allowedPolicies = Object.values(CardCancelPolicy) as string[];
+      if (!allowedPolicies.includes(payload)) {
+        log.warn(
+          { chatId, action, payload },
+          'Rejected unknown cancel policy from Telegram callback',
+        );
+        await editMenu(bot, chatId, messageId, '⚠️ Invalid cancel policy.');
+        return;
+      }
       const policy = payload as CardCancelPolicy;
       if (policy === CardCancelPolicy.AFTER_TTL) {
         await showTtlPicker(bot, chatId, messageId);
@@ -426,11 +493,45 @@ export async function handleMenuCallback(
         await savePrefPolicy(bot, chatId, messageId, user.id, policy);
       }
     } else if (action === 'menu_pref_ttl') {
-      const minutes = parseInt(payload, 10);
+      // Mirror the API-level Zod validation so a forged callback (e.g.
+      // `menu_pref_ttl:-1`, `menu_pref_ttl:99999`, or `menu_pref_ttl:12.5`)
+      // cannot bypass the bounds by going through the Telegram path. We
+      // require the payload to be an integer string so e.g. "12.5" is not
+      // silently truncated to 12 by parseInt.
+      const minutes = /^[1-9]\d*$/.test(payload) ? Number.parseInt(payload, 10) : NaN;
+      if (
+        !Number.isInteger(minutes) ||
+        minutes < TTL_MIN_MINUTES ||
+        minutes > TTL_MAX_MINUTES
+      ) {
+        log.warn(
+          { chatId, action, payload, parsed: minutes },
+          'Rejected out-of-range TTL value from Telegram callback',
+        );
+        await editMenu(
+          bot,
+          chatId,
+          messageId,
+          `⚠️ Invalid TTL. Must be between ${TTL_MIN_MINUTES} and ${TTL_MAX_MINUTES} minutes.`,
+        );
+        return;
+      }
       await savePrefTtl(bot, chatId, messageId, user.id, minutes);
+    } else {
+      // Unknown menu_* actions: log so we notice if the UI ships a button the
+      // backend doesn't handle, but don't crash.
+      log.warn({ chatId, action, payload }, 'Unknown menu_* callback action');
     }
-    // Unknown menu_* actions: silently ignore (no crash)
-  } catch {
-    await editMenu(bot, chatId, messageId, '⚠️ Something went wrong. Please try again.');
+  } catch (err) {
+    log.error(
+      { chatId, messageId, action, payload, userId: user.id, err },
+      'menu callback handler failed',
+    );
+    await editMenuSafe(
+      bot,
+      chatId,
+      messageId,
+      '⚠️ Something went wrong. Please try again.',
+    );
   }
 }
