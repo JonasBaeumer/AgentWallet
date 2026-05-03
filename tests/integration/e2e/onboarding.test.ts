@@ -336,6 +336,25 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
       },
     });
     await new Promise((r) => setTimeout(r, 200));
+    // Same as the happy-path test: after confirm the session is awaiting_provider.
+    // Without this callback the email step never completes linking, claimedByUserId
+    // stays null, and a subsequent /register renewal hits the per-agent cooldown
+    // (429) instead of the expected 409.
+    await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/telegram',
+      headers: { 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET },
+      payload: {
+        update_id: 20016,
+        callback_query: {
+          id: 'cb-provider-2',
+          data: 'signup_provider:STRIPE',
+          from: { id: chatId },
+          message: { message_id: 1, chat: { id: chatId } },
+        },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 200));
     await app.inject({
       method: 'POST',
       url: '/v1/webhooks/telegram',
