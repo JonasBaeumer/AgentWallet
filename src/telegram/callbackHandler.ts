@@ -1,6 +1,12 @@
 import type { Update } from 'grammy/types';
 import { prisma } from '@/db/client';
-import { ApprovalDecisionType, IntentStatus, InsufficientIssuingBalanceError } from '@/contracts';
+import {
+  ApprovalDecisionType,
+  IntentStatus,
+  InsufficientIssuingBalanceError,
+  IntentNotFoundError,
+  UserNotFoundError,
+} from '@/contracts';
 import { recordDecision } from '@/approval/approvalService';
 import { reserveForIntent, returnIntent } from '@/ledger/potService';
 import { getPaymentProvider } from '@/payments';
@@ -172,6 +178,19 @@ export async function handleTelegramCallback(update: Update): Promise<void> {
         chatId,
         messageId,
         `⚠️ Insufficient Stripe Issuing balance (${err.currency}): available ${err.available}, required ${err.required}.`,
+      );
+      return;
+    }
+    // Race conditions only — the intent and user were both verified at the
+    // top of this handler. Show a friendly message and don't rethrow so the
+    // Telegram webhook returns 200 (otherwise grammy retries the update).
+    if (err instanceof IntentNotFoundError || err instanceof UserNotFoundError) {
+      log.warn({ intentId, action, actorId, err }, 'Approval target disappeared mid-flow');
+      await editMessage(
+        bot,
+        chatId,
+        messageId,
+        '⚠️ This intent is no longer available. It may have expired or been cancelled.',
       );
       return;
     }

@@ -8,6 +8,8 @@ import {
   IntentStatus,
   InsufficientFundsError,
   InsufficientIssuingBalanceError,
+  IntentNotFoundError,
+  UserNotFoundError,
 } from '@/contracts';
 import { recordDecision } from '@/approval/approvalService';
 import { reserveForIntent, returnIntent } from '@/ledger/potService';
@@ -137,6 +139,14 @@ export async function approvalRoutes(fastify: FastifyInstance): Promise<void> {
           err instanceof InsufficientIssuingBalanceError
         ) {
           return reply.status(422).send({ error: err.message });
+        }
+        // The route already 404s on a missing intent and 403s on a
+        // foreign-owned intent before reaching this catch. These typed errors
+        // would only fire if the intent was deleted between those checks and
+        // reserveForIntent — defensive but mapped to 404 so the client sees
+        // a stable contract instead of a 500.
+        if (err instanceof IntentNotFoundError || err instanceof UserNotFoundError) {
+          return reply.status(404).send({ error: err.message });
         }
         throw err;
       }

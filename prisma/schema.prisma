@@ -104,16 +104,26 @@ model PurchaseIntent {
 }
 
 model VirtualCard {
-  id             String    @id @default(cuid())
-  intentId       String    @unique
-  providerCardId String    @unique
+  id             String          @id @default(cuid())
+  intentId       String          @unique
+  // Which provider issued this card. Pinned at creation so we never have to
+  // infer it later (a user can only switch providers via account-level reset
+  // — see #128 — so the user's current paymentProvider is not authoritative
+  // for historical cards).
+  provider       PaymentProvider @default(STRIPE)
+  providerCardId String
   last4          String
   revealedAt     DateTime?
   frozenAt       DateTime?
   cancelledAt    DateTime?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime        @default(now())
 
   intent         PurchaseIntent @relation(fields: [intentId], references: [id])
+
+  // Provider-scoped uniqueness: providerCardId is only unique within a given
+  // provider's id-space (Stripe `ic_*` and Privacy `card_*` cannot collide
+  // today, but we don't want to depend on that).
+  @@unique([provider, providerCardId])
 }
 
 model LedgerEntry {

@@ -7,6 +7,7 @@ import {
   CardReveal,
   CardAlreadyRevealedError,
   IntentNotFoundError,
+  PaymentProvider,
 } from '@/contracts';
 import { logger } from '@/config/logger';
 
@@ -101,6 +102,7 @@ export async function issueVirtualCard(
   const virtualCard = await prisma.virtualCard.create({
     data: {
       intentId,
+      provider: PaymentProvider.STRIPE,
       providerCardId: stripeCard.id,
       last4: stripeCard.last4,
     },

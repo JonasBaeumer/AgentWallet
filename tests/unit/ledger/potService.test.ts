@@ -83,9 +83,7 @@ describe('reserveForIntent', () => {
     });
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => fn(tx));
 
-    await expect(reserveForIntent('user-1', 'intent-1', 1000)).rejects.toThrow(
-      IntentNotFoundError,
-    );
+    await expect(reserveForIntent('user-1', 'intent-1', 1000)).rejects.toThrow(IntentNotFoundError);
     expect(tx.user.findUnique).not.toHaveBeenCalled();
     expect(tx.pot.create).not.toHaveBeenCalled();
   });
@@ -98,9 +96,7 @@ describe('reserveForIntent', () => {
     });
     (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => fn(tx));
 
-    await expect(reserveForIntent('user-1', 'intent-1', 1000)).rejects.toThrow(
-      IntentNotFoundError,
-    );
+    await expect(reserveForIntent('user-1', 'intent-1', 1000)).rejects.toThrow(IntentNotFoundError);
     expect(tx.pot.create).not.toHaveBeenCalled();
     expect(tx.ledgerEntry.create).not.toHaveBeenCalled();
   });

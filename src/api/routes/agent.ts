@@ -104,10 +104,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       await getProviderForIntent(intentId)
         .then((p) => p.cancelCard(intentId))
         .catch((err: unknown) => {
-          fastify.log.warn(
-            { intentId, err },
-            'Failed to cancel virtual card after agent result',
-          );
+          fastify.log.warn({ intentId, err }, 'Failed to cancel virtual card after agent result');
         });
 
       // Store receipt/error info in metadata

@@ -41,6 +41,7 @@ export class MockPaymentProvider implements IPaymentProvider {
     return {
       id: `mock-card-${intentId}`,
       intentId,
+      provider: this.metadata.id,
       providerCardId: `mock_provider_${intentId}`,
       last4: '4242',
       revealedAt: null,
