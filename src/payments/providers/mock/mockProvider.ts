@@ -11,7 +11,11 @@ type CallRecord = { method: string; args: unknown[]; timestamp: number };
 
 const METADATA: ProviderMetadata = {
   id: PaymentProvider.STRIPE,
+  displayName: 'Mock (Stripe-compatible)',
   currency: 'eur',
+  authorizationModel: 'per_transaction',
+  autoCancelAfterUse: false,
+  supportsFreeze: true,
 };
 
 export class MockPaymentProvider implements IPaymentProvider {

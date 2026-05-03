@@ -47,6 +47,7 @@ enum CardCancelPolicy {
 
 enum PaymentProvider {
   STRIPE
+  PRIVACY_COM
 }
 
 model User {

@@ -10,9 +10,12 @@ describe('MockPaymentProvider', () => {
 
   describe('metadata', () => {
     it('exposes provider metadata with Stripe-compatible defaults', () => {
-      expect(provider.metadata).toEqual({
+      expect(provider.metadata).toMatchObject({
         id: PaymentProvider.STRIPE,
         currency: 'eur',
+        authorizationModel: 'per_transaction',
+        autoCancelAfterUse: false,
+        supportsFreeze: true,
       });
     });
   });
