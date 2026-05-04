@@ -316,7 +316,10 @@ async function savePrefPolicy(
   userId: string,
   policy: CardCancelPolicy,
 ): Promise<void> {
-  await prisma.user.update({ where: { id: userId }, data: { cancelPolicy: policy } });
+  await prisma.user.update({
+    where: { id: userId },
+    data: { cancelPolicy: policy, cardTtlMinutes: null },
+  });
   const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
   await editMenu(
     bot,

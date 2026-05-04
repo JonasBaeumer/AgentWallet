@@ -449,7 +449,7 @@ describe('menu_pref_policy', () => {
 
     expect(mockPrisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { cancelPolicy: 'IMMEDIATE' },
+        data: { cancelPolicy: 'IMMEDIATE', cardTtlMinutes: null },
       }),
     );
     const text = mockEditMessageText.mock.calls[0][2] as string;
