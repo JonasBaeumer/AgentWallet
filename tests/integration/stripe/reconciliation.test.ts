@@ -117,13 +117,26 @@ describeIfStripe('Reconciliation integration', () => {
   afterAll(async () => {
     // Clean up DB records in FK dependency order. The schema doesn't define
     // ON DELETE CASCADE, so each child table must be cleared explicitly.
-    if (!intentId || !userId) return;
-    await prisma.ledgerEntry.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.pot.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.virtualCard.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.purchaseIntent.deleteMany({ where: { id: intentId } }).catch(() => {});
-    await prisma.user.deleteMany({ where: { id: userId } }).catch(() => {});
-    await prisma.$disconnect();
+    try {
+      // Safety: if beforeAll fails before assigning IDs, never run a deleteMany
+      // with an undefined filter (Prisma can interpret it as no filter).
+      if (intentId) {
+        await prisma.ledgerEntry.deleteMany({ where: { intentId } });
+        await prisma.pot.deleteMany({ where: { intentId } });
+        await prisma.virtualCard.deleteMany({ where: { intentId } });
+        await prisma.purchaseIntent.deleteMany({ where: { id: intentId } });
+      }
+
+      if (userId) {
+        await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Reconciliation integration cleanup failed', { intentId, userId, err });
+      throw err;
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   it('returns inSync:true when ledger matches Stripe captured amount', async () => {
