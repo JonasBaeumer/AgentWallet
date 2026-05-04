@@ -14,6 +14,6 @@ export interface CheckoutIntentJob {
   merchantUrl: string;
   price: number;
   currency: string;
-  stripeCardId: string;
+  providerCardId: string;
   last4: string;
 }

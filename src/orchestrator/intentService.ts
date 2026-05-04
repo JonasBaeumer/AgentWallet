@@ -4,7 +4,7 @@ import { logger } from '@/config/logger';
 
 const log = logger.child({ module: 'orchestrator/intentService' });
 import { transitionIntent, TransitionResult } from './stateMachine';
-import { getPaymentProvider } from '@/payments';
+import { getPaymentProvider, getProviderForIntent } from '@/payments';
 import { returnIntent } from '@/ledger/potService';
 import { enqueueCancelCard } from '@/queue/producers';
 import { getTelegramBot } from '@/telegram/telegramClient';
@@ -85,38 +85,50 @@ async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
   const intent = await prisma.purchaseIntent.findUnique({
     where: { id: intentId },
     include: {
-      user: { select: { cancelPolicy: true, cardTtlMinutes: true, telegramChatId: true } },
+      user: {
+        select: {
+          cancelPolicy: true,
+          cardTtlMinutes: true,
+          telegramChatId: true,
+          paymentProvider: true,
+        },
+      },
       virtualCard: true,
     },
   });
   if (!intent?.user) return;
 
-  const { cancelPolicy, cardTtlMinutes, telegramChatId } = intent.user;
+  const { cancelPolicy, cardTtlMinutes, telegramChatId, paymentProvider } = intent.user;
+  const provider = getPaymentProvider(paymentProvider);
 
   if (cancelPolicy === 'ON_TRANSACTION') {
     // Cancellation is handled by the issuing_transaction.created Stripe webhook.
     // Fallback for stub/test flows where no real Stripe transaction fires:
     if (!intent.virtualCard) {
-      await getPaymentProvider()
-        .cancelCard(intentId)
-        .catch((err) => {
-          log.error({ intentId, err }, 'ON_TRANSACTION stub fallback cancel failed');
-        });
+      await provider.cancelCard(intentId).catch((err) => {
+        log.error({ intentId, err }, 'ON_TRANSACTION stub fallback cancel failed');
+      });
     }
   } else if (cancelPolicy === 'IMMEDIATE') {
-    await getPaymentProvider()
-      .cancelCard(intentId)
-      .catch((err) => {
-        log.error({ intentId, err }, 'IMMEDIATE card cancel failed');
+    await provider.cancelCard(intentId).catch((err) => {
+      log.error({ intentId, err }, 'IMMEDIATE card cancel failed');
+    });
+  } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes != null) {
+    // cardTtlMinutes <= 0 means cancel immediately rather than enqueueing a
+    // 0-delay job (avoids a queue round-trip and a job that races the
+    // checkout response). Truthy check would treat 0 as "unset" and silently
+    // leave the card live.
+    if (cardTtlMinutes <= 0) {
+      await provider.cancelCard(intentId).catch((err) => {
+        log.error({ intentId, err }, 'AFTER_TTL immediate card cancel failed');
       });
-  } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes) {
-    await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
+    } else {
+      await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
+    }
   } else if (cancelPolicy === 'MANUAL') {
-    await getPaymentProvider()
-      .freezeCard(intentId)
-      .catch((err) => {
-        log.error({ intentId, err }, 'MANUAL card freeze failed');
-      });
+    await provider.freezeCard(intentId).catch((err) => {
+      log.error({ intentId, err }, 'MANUAL card freeze failed');
+    });
     if (telegramChatId) {
       await notifyManualCardPending(telegramChatId, intentId, intent.subject ?? intent.query);
     }
@@ -151,8 +163,8 @@ export async function failCheckout(
 async function cleanupExpiredIntent(intentId: string): Promise<void> {
   const card = await prisma.virtualCard.findUnique({ where: { intentId } });
   if (card) {
-    await getPaymentProvider()
-      .cancelCard(intentId)
+    await getProviderForIntent(intentId)
+      .then((p) => p.cancelCard(intentId))
       .catch((err) => {
         log.error({ intentId, err }, 'Failed to cancel card during expiry cleanup');
       });

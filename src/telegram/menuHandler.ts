@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { prisma } from '@/db/client';
 import { getTelegramBot } from './telegramClient';
 import { expireIntent } from '@/orchestrator/intentService';
-import { getPaymentProvider } from '@/payments';
+import { getProviderForIntent } from '@/payments';
 import { IntentStatus, CardCancelPolicy } from '@/contracts';
 import { setPrefSession } from './sessionStore';
 
@@ -321,7 +321,8 @@ async function doCancelCard(
   intentId: string,
 ): Promise<void> {
   try {
-    await getPaymentProvider().cancelCard(intentId);
+    const provider = await getProviderForIntent(intentId);
+    await provider.cancelCard(intentId);
     const keyboard = new InlineKeyboard().text('⬅️ Back to Menu', 'menu_main:_');
     await editMenu(bot, chatId, messageId, '✅ Card cancelled successfully.', keyboard);
   } catch {

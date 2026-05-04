@@ -1,16 +1,29 @@
-import { IPaymentProvider, IssuingBalance, VirtualCardData, CardReveal } from '@/contracts';
+import {
+  IPaymentProvider,
+  IssuingBalance,
+  VirtualCardData,
+  CardReveal,
+  ProviderMetadata,
+  PaymentProvider,
+} from '@/contracts';
 import { issueVirtualCard, revealCard, freezeCard, cancelCard } from './cardService';
 import { getIssuingBalance as fetchIssuingBalance } from './balanceService';
 import { handleStripeEvent } from './webhookHandler';
 
+const METADATA: ProviderMetadata = {
+  id: PaymentProvider.STRIPE,
+  currency: 'eur',
+};
+
 export class StripePaymentProvider implements IPaymentProvider {
+  readonly metadata = METADATA;
+
   async issueCard(
     intentId: string,
     amount: number,
-    currency: string,
     options?: { mccAllowlist?: string[] },
   ): Promise<VirtualCardData> {
-    return issueVirtualCard(intentId, amount, currency, options);
+    return issueVirtualCard(intentId, amount, this.metadata.currency, options);
   }
 
   async revealCard(intentId: string): Promise<CardReveal> {
@@ -32,7 +45,7 @@ export class StripePaymentProvider implements IPaymentProvider {
     return handleStripeEvent(rawBody, signature);
   }
 
-  async getIssuingBalance(currency: string): Promise<IssuingBalance> {
-    return fetchIssuingBalance(currency);
+  async getIssuingBalance(): Promise<IssuingBalance> {
+    return fetchIssuingBalance(this.metadata.currency);
   }
 }

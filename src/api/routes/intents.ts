@@ -6,6 +6,7 @@ import { createIntentSchema } from '@/api/validators/intents';
 import { IntentStatus } from '@/contracts';
 import { startSearching } from '@/orchestrator/intentService';
 import { enqueueSearch } from '@/queue/producers';
+import { getPaymentProvider } from '@/payments';
 
 export async function intentRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /v1/intents
@@ -39,7 +40,11 @@ export async function intentRoutes(fastify: FastifyInstance): Promise<void> {
 
       const user = request.user!;
       const userId = user.id;
-      const { query, subject, maxBudget, currency, expiresAt } = parsed.data;
+      const { query, subject, maxBudget, expiresAt } = parsed.data;
+
+      // Currency is derived from the user's payment provider — not caller-supplied —
+      // so ledger entries and card issuance can never diverge.
+      const currency = getPaymentProvider(user.paymentProvider).metadata.currency;
 
       const intent = await prisma.purchaseIntent.create({
         data: {

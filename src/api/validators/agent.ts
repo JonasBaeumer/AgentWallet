@@ -5,7 +5,7 @@ export const agentQuoteSchema = z.object({
   merchantName: z.string().min(1),
   merchantUrl: z.string().url(),
   price: z.number().int().positive(),
-  currency: z.string().length(3).default('gbp'),
+  currency: z.string().length(3).default('eur'),
 });
 
 export const agentResultSchema = z.object({

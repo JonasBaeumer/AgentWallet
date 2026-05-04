@@ -1,8 +1,12 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { getPaymentProvider } from '@/payments';
+import { PaymentProvider } from '@/contracts';
+import { stripeWebhookHeadersSchema } from '@/api/validators/webhooks';
 
 export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
   // Raw body is preserved for this path by app's content-type parser (required for Stripe signature verification).
+  // The route hardcodes PaymentProvider.STRIPE because each provider has its own webhook path
+  // with provider-specific signature schemes (Privacy.com will add /v1/webhooks/privacy in #106).
   fastify.post(
     '/v1/webhooks/stripe',
     {
@@ -15,15 +19,19 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       },
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const signature = request.headers['stripe-signature'] as string;
-      if (!signature) {
+      const parsed = stripeWebhookHeadersSchema.safeParse(request.headers);
+      if (!parsed.success) {
         return reply.status(400).send({ error: 'Missing stripe-signature header' });
       }
+      const signature = parsed.data['stripe-signature'];
 
       let response: Record<string, unknown> = { received: true };
       try {
         const body = request.body as Buffer | string;
-        response = await getPaymentProvider().handleWebhookEvent(body, signature);
+        response = await getPaymentProvider(PaymentProvider.STRIPE).handleWebhookEvent(
+          body,
+          signature,
+        );
       } catch (err) {
         // Log but always return 200 to Stripe to prevent retries
         fastify.log.error({ message: 'Stripe webhook processing error', error: String(err) });
