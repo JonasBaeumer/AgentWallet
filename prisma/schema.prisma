@@ -109,8 +109,9 @@ model VirtualCard {
   // Which provider issued this card. Pinned at creation so we never have to
   // infer it later (a user can only switch providers via account-level reset
   // — see #128 — so the user's current paymentProvider is not authoritative
-  // for historical cards).
-  provider       PaymentProvider @default(STRIPE)
+  // for historical cards). No default — every write site must set it
+  // explicitly so a future provider can't be silently mis-tagged as STRIPE.
+  provider       PaymentProvider
   providerCardId String
   last4          String
   revealedAt     DateTime?

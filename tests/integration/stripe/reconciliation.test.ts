@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import Stripe from 'stripe';
 import { prisma } from '@/db/client';
 import { reconcileIntent } from '@/payments/providers/stripe/reconciliationService';
+import { PaymentProvider } from '@/contracts';
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
 const describeIfStripe =
@@ -75,7 +76,12 @@ describeIfStripe('Reconciliation integration', () => {
     cardId = card.id;
 
     await prisma.virtualCard.create({
-      data: { intentId, providerCardId: cardId, last4: card.last4 },
+      data: {
+        intentId,
+        provider: PaymentProvider.STRIPE,
+        providerCardId: cardId,
+        last4: card.last4,
+      },
     });
 
     await stripe.testHelpers.issuing.transactions.createForceCapture({
