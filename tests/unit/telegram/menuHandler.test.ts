@@ -22,11 +22,19 @@ jest.mock('@/orchestrator/intentService', () => ({
   expireIntent: (...args: any[]) => mockExpireIntent(...args),
 }));
 
-// Mock payment provider
+// Mock payment provider — separate jest.fn() per resolver so tests can assert
+// the call site uses the right one (an intent-scoped flow must call
+// getProviderForIntent, not getPaymentProvider with a hardcoded id).
 const mockCancelCard = jest.fn();
 const mockFreezeCard = jest.fn();
+const mockProvider = { cancelCard: mockCancelCard, freezeCard: mockFreezeCard };
+const mockGetPaymentProvider = jest.fn(() => mockProvider);
+const mockGetProviderForIntent = jest.fn(() => Promise.resolve(mockProvider));
+const mockGetProviderForUser = jest.fn(() => Promise.resolve(mockProvider));
 jest.mock('@/payments', () => ({
-  getPaymentProvider: () => ({ cancelCard: mockCancelCard, freezeCard: mockFreezeCard }),
+  getPaymentProvider: (...args: any[]) => mockGetPaymentProvider(...args),
+  getProviderForIntent: (...args: any[]) => mockGetProviderForIntent(...args),
+  getProviderForUser: (...args: any[]) => mockGetProviderForUser(...args),
 }));
 
 // Mock sessionStore
@@ -517,6 +525,10 @@ describe('menu_card_cancel', () => {
     );
 
     expect(mockCancelCard).toHaveBeenCalledWith('intent-abc');
+    // The cancel flow is intent-scoped — must resolve the provider via the
+    // intent, not a hardcoded id passed to getPaymentProvider.
+    expect(mockGetProviderForIntent).toHaveBeenCalledWith('intent-abc');
+    expect(mockGetPaymentProvider).not.toHaveBeenCalled();
     const text = mockEditMessageText.mock.calls[0][2] as string;
     expect(text.toLowerCase()).toContain('cancelled');
   });

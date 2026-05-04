@@ -111,7 +111,7 @@ testSuite('Card lifecycle integration', () => {
 
         await issueVirtualCard(intentId, 1_000, 'eur');
         const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
-        stripeCardId = card.stripeCardId;
+        stripeCardId = card.providerCardId;
 
         // Stripe test mode needs ~3-5s for cardholder verification to settle;
         // without this wait, authorizations are declined with cardholder_verification_required
@@ -214,7 +214,7 @@ testSuite('Card lifecycle integration', () => {
 
         await issueVirtualCard(intentId, 1_000, 'eur');
         const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
-        stripeCardId = card.stripeCardId;
+        stripeCardId = card.providerCardId;
 
         await new Promise((r) => setTimeout(r, 5_000));
       } catch (err) {

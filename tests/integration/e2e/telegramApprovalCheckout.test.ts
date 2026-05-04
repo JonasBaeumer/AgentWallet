@@ -165,7 +165,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
         // Mock mode: skip the 60 s wait and auto-approve immediately
         await recordDecision(intentId, ApprovalDecisionType.APPROVED, 'test-mock-approve');
         await reserveForIntent(userId, intentId, MAX_BUDGET);
-        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET, CURRENCY);
+        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET);
         await markCardIssued(intentId);
         await startCheckout(intentId);
 
@@ -205,7 +205,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
         console.log('Timeout -- auto-approving and continuing...');
         await recordDecision(intentId, ApprovalDecisionType.APPROVED, 'test-auto-approve');
         await reserveForIntent(userId, intentId, MAX_BUDGET);
-        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET, CURRENCY);
+        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET);
         await markCardIssued(intentId);
         await startCheckout(intentId);
         currentStatus = IntentStatus.CHECKOUT_RUNNING;
@@ -225,10 +225,10 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
   // -- Step 5 -- Verify card was issued ---------------------------------------
   it('has a real Stripe Issuing card in the database', async () => {
     const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
-    expect(card.stripeCardId).toMatch(/^ic_/);
+    expect(card.providerCardId).toMatch(/^ic_/);
     expect(card.last4).toHaveLength(4);
 
-    const stripeCard = await stripeCtx.stripe.issuing.cards.retrieve(card.stripeCardId);
+    const stripeCard = await stripeCtx.stripe.issuing.cards.retrieve(card.providerCardId);
     expect(stripeCard.status).toBe('active');
     expect(stripeCard.spending_controls.spending_limits[0].amount).toBe(MAX_BUDGET);
 
@@ -247,7 +247,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
     const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
 
     const auth = await stripeCtx.stripe.testHelpers.issuing.authorizations.create({
-      card: card.stripeCardId,
+      card: card.providerCardId,
       amount: CHECKOUT_AMOUNT,
       currency: CURRENCY,
       merchant_data: { name: MERCHANT_NAME },
