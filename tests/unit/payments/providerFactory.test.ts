@@ -177,5 +177,12 @@ describe('providerFactory — getProviderForUser / getProviderForIntent', () => 
 
       await expect(getProviderForIntent('missing-intent')).rejects.toThrow(IntentNotFoundError);
     });
+
+    it('rethrows non-P2025 errors unchanged', async () => {
+      const dbErr = new Error('connection refused');
+      (prisma.purchaseIntent.findUniqueOrThrow as jest.Mock).mockRejectedValue(dbErr);
+
+      await expect(getProviderForIntent('intent-1')).rejects.toBe(dbErr);
+    });
   });
 });
