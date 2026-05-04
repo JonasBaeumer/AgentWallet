@@ -117,7 +117,7 @@ describe('User AFTER_TTL ↔ cardTtlMinutes CHECK constraint', () => {
   });
 
   describe('accepts valid states', () => {
-
+    it('allows AFTER_TTL with positive cardTtlMinutes', async () => {
       const user = await createUser({
         cancelPolicy: CardCancelPolicy.AFTER_TTL,
         cardTtlMinutes: 30,
