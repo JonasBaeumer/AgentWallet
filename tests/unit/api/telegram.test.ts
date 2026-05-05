@@ -10,6 +10,7 @@ jest.mock('@/config/env', () => ({
     TELEGRAM_BOT_TOKEN: 'test-bot-token',
     TELEGRAM_WEBHOOK_SECRET: 'test-webhook-secret',
     TELEGRAM_TEST_CHAT_ID: '',
+    TELEGRAM_TEST_CHANNEL_ID: '',
   },
 }));
 

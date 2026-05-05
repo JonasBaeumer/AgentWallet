@@ -24,6 +24,7 @@ jest.mock('@/config/env', () => ({
     TELEGRAM_BOT_TOKEN: '',
     TELEGRAM_WEBHOOK_SECRET: 'test-telegram-secret',
     TELEGRAM_TEST_CHAT_ID: '',
+    TELEGRAM_TEST_CHANNEL_ID: '',
     TELEGRAM_MOCK: false,
     PAYMENT_PROVIDER: 'stripe',
   },
