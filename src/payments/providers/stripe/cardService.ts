@@ -7,6 +7,7 @@ import {
   CardReveal,
   CardAlreadyRevealedError,
   IntentNotFoundError,
+  PaymentProvider,
 } from '@/contracts';
 import { logger } from '@/config/logger';
 
@@ -33,8 +34,8 @@ export async function issueVirtualCard(
   // Upsert cardholder: reuse existing Stripe cardholder if the user already has one,
   // otherwise create a new one and persist the ID so future intents reuse it.
   let cardholderId: string;
-  if (intent.user.stripeCardholderId) {
-    cardholderId = intent.user.stripeCardholderId;
+  if (intent.user.providerCardholderId) {
+    cardholderId = intent.user.providerCardholderId;
   } else {
     let newCardholder: Stripe.Issuing.Cardholder;
     try {
@@ -67,7 +68,7 @@ export async function issueVirtualCard(
     // Persist so all future intents for this user reuse the same cardholder
     await prisma.user.update({
       where: { id: intent.user.id },
-      data: { stripeCardholderId: cardholderId },
+      data: { providerCardholderId: cardholderId },
     });
   }
 
@@ -97,11 +98,12 @@ export async function issueVirtualCard(
     throw err;
   }
 
-  // Persist ONLY stripeCardId + last4 — never PAN, CVC
+  // Persist ONLY providerCardId + last4 — never PAN, CVC
   const virtualCard = await prisma.virtualCard.create({
     data: {
       intentId,
-      stripeCardId: stripeCard.id,
+      provider: PaymentProvider.STRIPE,
+      providerCardId: stripeCard.id,
       last4: stripeCard.last4,
     },
   });
@@ -119,7 +121,7 @@ export async function revealCard(intentId: string): Promise<CardReveal> {
   // Retrieve card with expanded number and CVC (test mode only)
   let stripeCard: Stripe.Issuing.Card;
   try {
-    stripeCard = await stripe.issuing.cards.retrieve(card.stripeCardId, {
+    stripeCard = await stripe.issuing.cards.retrieve(card.providerCardId, {
       expand: ['number', 'cvc'],
     });
   } catch (err) {
@@ -154,7 +156,7 @@ export async function freezeCard(intentId: string): Promise<void> {
   if (!card) throw new IntentNotFoundError(intentId);
 
   try {
-    await stripe.issuing.cards.update(card.stripeCardId, { status: 'inactive' });
+    await stripe.issuing.cards.update(card.providerCardId, { status: 'inactive' });
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
       log.error({ intentId, type: err.type, code: err.code, err }, 'Failed to freeze card');
@@ -177,7 +179,7 @@ export async function cancelCard(intentId: string): Promise<void> {
 
   const stripe = getStripeClient();
   try {
-    await stripe.issuing.cards.update(card.stripeCardId, { status: 'canceled' });
+    await stripe.issuing.cards.update(card.providerCardId, { status: 'canceled' });
   } catch (err) {
     if (err instanceof Stripe.errors.StripeError) {
       // Guard 2: card was already cancelled externally (e.g. Stripe dashboard)

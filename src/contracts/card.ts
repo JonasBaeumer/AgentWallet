@@ -1,7 +1,11 @@
+import type { PaymentProvider } from './payment';
+
 export interface VirtualCardData {
   id: string;
   intentId: string;
-  stripeCardId: string;
+  // Pinned at issuance — see prisma/schema.prisma VirtualCard.
+  provider: PaymentProvider;
+  providerCardId: string;
   last4: string;
   revealedAt: Date | null;
   frozenAt: Date | null;

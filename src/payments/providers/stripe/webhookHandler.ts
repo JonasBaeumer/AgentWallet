@@ -1,8 +1,8 @@
 import Stripe from 'stripe';
 import { getStripeClient } from './stripeClient';
+import { cancelCard } from './cardService';
 import { prisma } from '@/db/client';
 import { reconcileIntent } from './reconciliationService';
-import { getPaymentProvider } from '@/payments';
 import { logger } from '@/config/logger';
 
 const log = logger.child({ module: 'payments/stripe/webhookHandler' });
@@ -60,11 +60,9 @@ export async function handleStripeEvent(
         include: { user: { select: { cancelPolicy: true } } },
       });
       if (intentForPolicy?.user?.cancelPolicy === 'ON_TRANSACTION') {
-        getPaymentProvider()
-          .cancelCard(intentId)
-          .catch((err) => {
-            log.error({ intentId, err }, 'ON_TRANSACTION card cancel failed');
-          });
+        cancelCard(intentId).catch((err) => {
+          log.error({ intentId, err }, 'ON_TRANSACTION card cancel failed');
+        });
       }
 
       // Fire-and-forget reconciliation — discrepancy failure must not break webhook

@@ -12,6 +12,13 @@ export class IntentNotFoundError extends Error {
   }
 }
 
+export class UserNotFoundError extends Error {
+  constructor(userId: string) {
+    super(`User not found: ${userId}`);
+    this.name = 'UserNotFoundError';
+  }
+}
+
 export class InvalidApprovalStateError extends Error {
   constructor(intentId: string, currentStatus: string) {
     super(`Intent ${intentId} is not in AWAITING_APPROVAL state (current: ${currentStatus})`);

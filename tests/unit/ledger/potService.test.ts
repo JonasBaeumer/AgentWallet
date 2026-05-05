@@ -6,7 +6,7 @@ jest.mock('@/db/client', () => ({
 
 import { reserveForIntent, settleIntent, returnIntent } from '@/ledger/potService';
 import { prisma } from '@/db/client';
-import { InsufficientFundsError } from '@/contracts';
+import { InsufficientFundsError, IntentNotFoundError } from '@/contracts';
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 
@@ -17,6 +17,11 @@ function makeTxMock(overrides: Record<string, any> = {}) {
     user: { findUnique: jest.fn(), update: jest.fn() },
     pot: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     ledgerEntry: { create: jest.fn() },
+    purchaseIntent: {
+      // Default: intent belongs to 'user-1' so the ownership check in
+      // reserveForIntent passes for the common test setup.
+      findUnique: jest.fn().mockResolvedValue({ currency: 'eur', userId: 'user-1' }),
+    },
     ...overrides,
   };
 }
@@ -51,6 +56,51 @@ describe('reserveForIntent', () => {
         data: expect.objectContaining({ reservedAmount: 5000, status: 'ACTIVE' }),
       }),
     );
+  });
+
+  it('writes ledger entry with the currency fetched from the intent', async () => {
+    const tx = makeTxMock({
+      purchaseIntent: {
+        findUnique: jest.fn().mockResolvedValue({ currency: 'usd', userId: 'user-1' }),
+      },
+    });
+    tx.user.findUnique.mockResolvedValue({ id: 'user-1', mainBalance: 10000 });
+    tx.pot.create.mockResolvedValue({ id: 'pot-1', reservedAmount: 5000, status: 'ACTIVE' });
+    (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => fn(tx));
+
+    await reserveForIntent('user-1', 'intent-1', 5000);
+
+    expect(tx.ledgerEntry.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ currency: 'usd' }),
+      }),
+    );
+  });
+
+  it('throws IntentNotFoundError when the intent does not exist', async () => {
+    const tx = makeTxMock({
+      purchaseIntent: { findUnique: jest.fn().mockResolvedValue(null) },
+    });
+    (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => fn(tx));
+
+    await expect(reserveForIntent('user-1', 'intent-1', 1000)).rejects.toThrow(IntentNotFoundError);
+    expect(tx.user.findUnique).not.toHaveBeenCalled();
+    expect(tx.pot.create).not.toHaveBeenCalled();
+  });
+
+  it('throws IntentNotFoundError when the intent belongs to a different user', async () => {
+    const tx = makeTxMock({
+      purchaseIntent: {
+        findUnique: jest.fn().mockResolvedValue({ currency: 'eur', userId: 'someone-else' }),
+      },
+    });
+    (mockPrisma.$transaction as jest.Mock).mockImplementation(async (fn: Function) => fn(tx));
+
+    await expect(reserveForIntent('user-1', 'intent-1', 1000)).rejects.toThrow(IntentNotFoundError);
+    // Ownership check must short-circuit before any user lookup or writes.
+    expect(tx.user.findUnique).not.toHaveBeenCalled();
+    expect(tx.pot.create).not.toHaveBeenCalled();
+    expect(tx.ledgerEntry.create).not.toHaveBeenCalled();
   });
 });
 

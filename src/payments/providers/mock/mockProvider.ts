@@ -1,10 +1,24 @@
-import { IPaymentProvider, IssuingBalance, VirtualCardData, CardReveal } from '@/contracts';
+import {
+  IPaymentProvider,
+  IssuingBalance,
+  VirtualCardData,
+  CardReveal,
+  ProviderMetadata,
+  PaymentProvider,
+} from '@/contracts';
 
 type CallRecord = { method: string; args: unknown[]; timestamp: number };
 
 export class MockPaymentProvider implements IPaymentProvider {
+  readonly metadata: ProviderMetadata;
   private calls: CallRecord[] = [];
   private issuingBalance = 999_999_99;
+
+  // Reflect the requested provider type so callers branching on
+  // provider.metadata.id see the id they asked for in tests.
+  constructor(providerType: PaymentProvider = PaymentProvider.STRIPE) {
+    this.metadata = { id: providerType, currency: 'eur' };
+  }
 
   getCalls(): CallRecord[] {
     return [...this.calls];
@@ -17,18 +31,18 @@ export class MockPaymentProvider implements IPaymentProvider {
   async issueCard(
     intentId: string,
     amount: number,
-    currency: string,
     options?: { mccAllowlist?: string[] },
   ): Promise<VirtualCardData> {
     this.calls.push({
       method: 'issueCard',
-      args: [intentId, amount, currency, options],
+      args: [intentId, amount, options],
       timestamp: Date.now(),
     });
     return {
       id: `mock-card-${intentId}`,
       intentId,
-      stripeCardId: `mock_stripe_${intentId}`,
+      provider: this.metadata.id,
+      providerCardId: `mock_provider_${intentId}`,
       last4: '4242',
       revealedAt: null,
       frozenAt: null,
@@ -62,9 +76,9 @@ export class MockPaymentProvider implements IPaymentProvider {
     return { received: true };
   }
 
-  async getIssuingBalance(currency: string): Promise<IssuingBalance> {
-    this.calls.push({ method: 'getIssuingBalance', args: [currency], timestamp: Date.now() });
-    return { available: this.issuingBalance, currency: currency.toLowerCase() };
+  async getIssuingBalance(): Promise<IssuingBalance> {
+    this.calls.push({ method: 'getIssuingBalance', args: [], timestamp: Date.now() });
+    return { available: this.issuingBalance, currency: this.metadata.currency };
   }
 
   setIssuingBalance(amount: number): void {

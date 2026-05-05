@@ -24,14 +24,14 @@ export async function runSimulatedCheckout(params: {
   const stripe = getStripeClient();
   const { intentId, amount, currency, merchantName } = params;
 
-  // Look up stripeCardId from DB — no raw card data needed
+  // Look up providerCardId from DB — no raw card data needed
   const virtualCard = await prisma.virtualCard.findUnique({ where: { intentId } });
   if (!virtualCard) throw new IntentNotFoundError(intentId);
 
   let auth: Stripe.Issuing.Authorization;
   try {
     auth = await stripe.testHelpers.issuing.authorizations.create({
-      card: virtualCard.stripeCardId,
+      card: virtualCard.providerCardId,
       amount,
       currency: currency.toLowerCase(),
       merchant_data: { name: merchantName },

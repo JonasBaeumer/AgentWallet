@@ -45,26 +45,31 @@ enum CardCancelPolicy {
   MANUAL
 }
 
-model User {
-  id                  String          @id @default(cuid())
-  email               String          @unique
-  mainBalance         Int             @default(0)
-  maxBudgetPerIntent  Int             @default(50000)
-  merchantAllowlist   String[]        @default([])
-  mccAllowlist        String[]        @default([])
-  stripeCardholderId  String?
-  telegramChatId      String?
-  phoneNumber         String?
-  agentId             String?         @unique
-  apiKeyHash          String?
-  apiKeyPrefix        String?         @unique
-  cancelPolicy        CardCancelPolicy @default(ON_TRANSACTION)
-  cardTtlMinutes      Int?
-  createdAt           DateTime        @default(now())
+enum PaymentProvider {
+  STRIPE
+}
 
-  intents             PurchaseIntent[]
-  ledgerEntries       LedgerEntry[]
-  pots                Pot[]
+model User {
+  id                     String           @id @default(cuid())
+  email                  String           @unique
+  mainBalance            Int              @default(0)
+  maxBudgetPerIntent     Int              @default(50000)
+  merchantAllowlist      String[]         @default([])
+  mccAllowlist           String[]         @default([])
+  paymentProvider        PaymentProvider  @default(STRIPE)
+  providerCardholderId   String?
+  telegramChatId         String?
+  phoneNumber            String?
+  agentId                String?          @unique
+  apiKeyHash             String?
+  apiKeyPrefix           String?          @unique
+  cancelPolicy           CardCancelPolicy @default(ON_TRANSACTION)
+  cardTtlMinutes         Int?
+  createdAt              DateTime         @default(now())
+
+  intents                PurchaseIntent[]
+  ledgerEntries          LedgerEntry[]
+  pots                   Pot[]
 }
 
 model PairingCode {
@@ -99,16 +104,27 @@ model PurchaseIntent {
 }
 
 model VirtualCard {
-  id           String    @id @default(cuid())
-  intentId     String    @unique
-  stripeCardId String    @unique
-  last4        String
-  revealedAt   DateTime?
-  frozenAt     DateTime?
-  cancelledAt  DateTime?
-  createdAt    DateTime  @default(now())
+  id             String          @id @default(cuid())
+  intentId       String          @unique
+  // Which provider issued this card. Pinned at creation so we never have to
+  // infer it later (a user can only switch providers via account-level reset
+  // — see #128 — so the user's current paymentProvider is not authoritative
+  // for historical cards). No default — every write site must set it
+  // explicitly so a future provider can't be silently mis-tagged as STRIPE.
+  provider       PaymentProvider
+  providerCardId String
+  last4          String
+  revealedAt     DateTime?
+  frozenAt       DateTime?
+  cancelledAt    DateTime?
+  createdAt      DateTime        @default(now())
 
-  intent       PurchaseIntent @relation(fields: [intentId], references: [id])
+  intent         PurchaseIntent @relation(fields: [intentId], references: [id])
+
+  // Provider-scoped uniqueness: providerCardId is only unique within a given
+  // provider's id-space (Stripe `ic_*` and Privacy `card_*` cannot collide
+  // today, but we don't want to depend on that).
+  @@unique([provider, providerCardId])
 }
 
 model LedgerEntry {
