@@ -34,21 +34,25 @@ export async function startSearching(intentId: string): Promise<TransitionResult
 export async function receiveQuote(
   intentId: string,
   quotePayload: Record<string, unknown>,
+  agentId?: string,
 ): Promise<TransitionResult> {
   // Persist quote data in metadata so the approval route can read merchant/price info
   await prisma.purchaseIntent.update({
     where: { id: intentId },
     data: { metadata: quotePayload as any },
   });
-  return transitionIntent(intentId, IntentEvent.QUOTE_RECEIVED, quotePayload);
+  return transitionIntent(intentId, IntentEvent.QUOTE_RECEIVED, quotePayload, { agentId });
 }
 
-export async function requestApproval(intentId: string): Promise<TransitionResult> {
-  return transitionIntent(intentId, IntentEvent.APPROVAL_REQUESTED);
+export async function requestApproval(
+  intentId: string,
+  agentId?: string,
+): Promise<TransitionResult> {
+  return transitionIntent(intentId, IntentEvent.APPROVAL_REQUESTED, {}, { agentId });
 }
 
 export async function approveIntent(intentId: string, actorId: string): Promise<TransitionResult> {
-  return transitionIntent(intentId, IntentEvent.USER_APPROVED, {}, actorId);
+  return transitionIntent(intentId, IntentEvent.USER_APPROVED, {}, { actor: actorId });
 }
 
 export async function denyIntent(
@@ -56,22 +60,33 @@ export async function denyIntent(
   actorId: string,
   reason?: string,
 ): Promise<TransitionResult> {
-  return transitionIntent(intentId, IntentEvent.USER_DENIED, { reason }, actorId);
+  return transitionIntent(intentId, IntentEvent.USER_DENIED, { reason }, { actor: actorId });
 }
 
 export async function markCardIssued(intentId: string): Promise<TransitionResult> {
   return transitionIntent(intentId, IntentEvent.CARD_ISSUED);
 }
 
-export async function startCheckout(intentId: string): Promise<TransitionResult> {
-  return transitionIntent(intentId, IntentEvent.CHECKOUT_STARTED, {}, 'worker');
+export async function startCheckout(intentId: string, agentId?: string): Promise<TransitionResult> {
+  return transitionIntent(
+    intentId,
+    IntentEvent.CHECKOUT_STARTED,
+    {},
+    { actor: agentId ?? 'worker', agentId },
+  );
 }
 
 export async function completeCheckout(
   intentId: string,
   actualAmount: number,
+  agentId?: string,
 ): Promise<TransitionResult> {
-  const result = await transitionIntent(intentId, IntentEvent.CHECKOUT_SUCCEEDED, { actualAmount });
+  const result = await transitionIntent(
+    intentId,
+    IntentEvent.CHECKOUT_SUCCEEDED,
+    { actualAmount },
+    { agentId },
+  );
 
   // Apply cancel policy — fire-and-forget so policy errors never block the checkout response
   applyPostCheckoutCancelPolicy(intentId).catch((err) => {
@@ -144,8 +159,9 @@ async function notifyManualCardPending(
 export async function failCheckout(
   intentId: string,
   errorMessage: string,
+  agentId?: string,
 ): Promise<TransitionResult> {
-  return transitionIntent(intentId, IntentEvent.CHECKOUT_FAILED, { errorMessage });
+  return transitionIntent(intentId, IntentEvent.CHECKOUT_FAILED, { errorMessage }, { agentId });
 }
 
 async function cleanupExpiredIntent(intentId: string): Promise<void> {
