@@ -20,7 +20,7 @@
     "@fastify/rate-limit": "^9.1.0",
     "@prisma/client": "^5.14.0",
     "bcryptjs": "^3.0.3",
-    "bullmq": "^5.12.0",
+    "bullmq": "^5.76.1",
     "dotenv": "^17.4.2",
     "fastify": "^4.28.0",
     "grammy": "^1.40.0",
