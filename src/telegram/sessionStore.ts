@@ -7,6 +7,9 @@ export interface SignupSession {
   step: 'awaiting_confirmation' | 'awaiting_email';
   agentId: string;
   pairingCode: string;
+  // message_ids of every bot-sent and user-sent message during signup,
+  // bulk-deleted on success or when a stale session is replaced by a new /start.
+  messageIds?: number[];
 }
 
 export async function getSignupSession(chatId: number | string): Promise<SignupSession | null> {

@@ -8,4 +8,4 @@ export interface AuditEventData {
   createdAt: Date;
 }
 
-export type AgentAuditEvent = 'AGENT_LINKED' | 'AGENT_UNLINKED';
+export type AgentAuditEvent = 'AGENT_LINKED' | 'AGENT_UNLINKED' | 'TELEGRAM_SETUP_CLEANED';

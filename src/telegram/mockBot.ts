@@ -6,6 +6,7 @@
  *   - sendMessage
  *   - answerCallbackQuery
  *   - editMessageText
+ *   - deleteMessage
  */
 
 export interface MockCall {
@@ -61,6 +62,11 @@ const mockApi = {
       text,
       date: Math.floor(Date.now() / 1000),
     });
+  },
+
+  deleteMessage(chatId: string | number, messageId: number) {
+    record('deleteMessage', [chatId, messageId]);
+    return Promise.resolve(true);
   },
 };
 

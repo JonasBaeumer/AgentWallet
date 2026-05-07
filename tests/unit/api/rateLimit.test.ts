@@ -23,8 +23,6 @@ jest.mock('@/config/env', () => ({
     REDIS_URL: 'redis://localhost:6379',
     TELEGRAM_BOT_TOKEN: '',
     TELEGRAM_WEBHOOK_SECRET: 'test-telegram-secret',
-    TELEGRAM_TEST_CHAT_ID: '',
-    TELEGRAM_TEST_CHANNEL_ID: '',
     TELEGRAM_MOCK: false,
     PAYMENT_PROVIDER: 'stripe',
   },
