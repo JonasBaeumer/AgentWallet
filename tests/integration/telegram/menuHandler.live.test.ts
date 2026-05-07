@@ -44,9 +44,9 @@ import type { FastifyInstance } from 'fastify';
 // ── Environment ───────────────────────────────────────────────────────────────
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TEST_CHAT_ID = process.env.TELEGRAM_TEST_CHAT_ID
-  ? parseInt(process.env.TELEGRAM_TEST_CHAT_ID, 10)
-  : null;
+// Prefer the dedicated test channel to keep the main bot chat uncluttered
+const _testChatIdRaw = process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID;
+const TEST_CHAT_ID = _testChatIdRaw ? parseInt(_testChatIdRaw, 10) : null;
 const TELEGRAM_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? 'ilovedatadogok';
 const BASE = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const isMockEnv = process.env.TELEGRAM_MOCK === 'true';

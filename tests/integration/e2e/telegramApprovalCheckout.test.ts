@@ -44,7 +44,9 @@ jest.setTimeout(60_000);
 const hasStripeKey = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_');
 const isMockMode = process.env.TELEGRAM_MOCK === 'true' || !process.env.TELEGRAM_BOT_TOKEN;
 const hasTelegram =
-  isMockMode || (!!process.env.TELEGRAM_BOT_TOKEN && !!process.env.TELEGRAM_TEST_CHAT_ID);
+  isMockMode ||
+  (!!process.env.TELEGRAM_BOT_TOKEN &&
+    !!(process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID));
 
 const testSuite = hasStripeKey && hasTelegram ? describe : describe.skip;
 
@@ -62,8 +64,10 @@ const CURRENCY = 'eur';
 const APPROVAL_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 2_000;
 
-// Use a synthetic chat ID in mock mode
-const TEST_CHAT_ID = isMockMode ? '999999999' : process.env.TELEGRAM_TEST_CHAT_ID!;
+// Use a synthetic chat ID in mock mode; prefer the dedicated test channel over the main chat
+const TEST_CHAT_ID = isMockMode
+  ? '999999999'
+  : (process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID)!;
 
 // -- Teardown -----------------------------------------------------------------
 afterAll(async () => {
@@ -167,7 +171,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
         // Mock mode: skip the 60 s wait and auto-approve immediately
         await recordDecision(intentId, ApprovalDecisionType.APPROVED, 'test-mock-approve');
         await reserveForIntent(userId, intentId, MAX_BUDGET);
-        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET, CURRENCY);
+        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET);
         await markCardIssued(intentId);
         await startCheckout(intentId);
 
@@ -207,7 +211,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
         console.log('Timeout -- auto-approving and continuing...');
         await recordDecision(intentId, ApprovalDecisionType.APPROVED, 'test-auto-approve');
         await reserveForIntent(userId, intentId, MAX_BUDGET);
-        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET, CURRENCY);
+        await stripeCtx.provider.issueCard(intentId, MAX_BUDGET);
         await markCardIssued(intentId);
         await startCheckout(intentId);
         currentStatus = IntentStatus.CHECKOUT_RUNNING;
@@ -227,10 +231,10 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
   // -- Step 5 -- Verify card was issued ---------------------------------------
   it('has a real Stripe Issuing card in the database', async () => {
     const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
-    expect(card.stripeCardId).toMatch(/^ic_/);
+    expect(card.providerCardId).toMatch(/^ic_/);
     expect(card.last4).toHaveLength(4);
 
-    const stripeCard = await stripeCtx.stripe.issuing.cards.retrieve(card.stripeCardId);
+    const stripeCard = await stripeCtx.stripe.issuing.cards.retrieve(card.providerCardId);
     expect(stripeCard.status).toBe('active');
     expect(stripeCard.spending_controls.spending_limits[0].amount).toBe(MAX_BUDGET);
 
@@ -251,7 +255,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
     // Use force-capture to bypass real-time authorization webhooks — a running
     // stripe listen listener would otherwise interfere with the authorization.
     const tx = await stripeCtx.stripe.testHelpers.issuing.transactions.createForceCapture({
-      card: card.stripeCardId,
+      card: card.providerCardId,
       amount: CHECKOUT_AMOUNT,
       currency: CURRENCY,
       merchant_data: { name: MERCHANT_NAME },

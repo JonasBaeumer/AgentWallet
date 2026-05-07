@@ -10,6 +10,7 @@ jest.mock('@/config/env', () => ({
     STRIPE_SECRET_KEY: 'sk_test_placeholder',
     STRIPE_WEBHOOK_SECRET: 'whsec_placeholder',
     TELEGRAM_TEST_CHAT_ID: '',
+    TELEGRAM_TEST_CHANNEL_ID: '',
   },
 }));
 
@@ -38,7 +39,7 @@ jest.mock('@/ledger/potService', () => ({
   returnIntent: mockReturnIntent,
 }));
 
-const mockIssueCard = jest.fn().mockResolvedValue({ stripeCardId: 'ic_test', last4: '4242' });
+const mockIssueCard = jest.fn().mockResolvedValue({ providerCardId: 'ic_test', last4: '4242' });
 const mockRevealCard = jest.fn().mockResolvedValue({
   number: '4242424242424242',
   cvc: '123',
@@ -51,7 +52,7 @@ const mockCancelCard = jest.fn().mockResolvedValue(undefined);
 const mockHandleWebhookEvent = jest.fn().mockResolvedValue(undefined);
 const mockGetIssuingBalance = jest
   .fn()
-  .mockResolvedValue({ available: 999_999_99, currency: 'gbp' });
+  .mockResolvedValue({ available: 999_999_99, currency: 'eur' });
 const mockProvider = {
   issueCard: mockIssueCard,
   revealCard: mockRevealCard,
@@ -62,6 +63,8 @@ const mockProvider = {
 };
 jest.mock('@/payments', () => ({
   getPaymentProvider: () => mockProvider,
+  getProviderForIntent: () => Promise.resolve(mockProvider),
+  getProviderForUser: () => Promise.resolve(mockProvider),
 }));
 
 const mockMarkCardIssued = jest.fn().mockResolvedValue({});
@@ -114,7 +117,7 @@ beforeEach(() => {
 
   mockAnswerCallbackQuery.mockResolvedValue(undefined);
   mockEditMessageText.mockResolvedValue(undefined);
-  mockIssueCard.mockResolvedValue({ stripeCardId: 'ic_test', last4: '4242' });
+  mockIssueCard.mockResolvedValue({ providerCardId: 'ic_test', last4: '4242' });
   mockGetSession.mockResolvedValue(null);
   mockSetSession.mockResolvedValue(undefined);
   mockClearSession.mockResolvedValue(undefined);
@@ -137,9 +140,9 @@ function seedAwaitingIntent(id: string) {
     userId: 'user-1',
     status: IntentStatus.AWAITING_APPROVAL,
     maxBudget: 10000,
-    currency: 'gbp',
+    currency: 'eur',
     metadata: { merchantName: 'Amazon UK', merchantUrl: 'https://amazon.co.uk', price: 9999 },
-    user: { id: 'user-1', mccAllowlist: [] },
+    user: { id: 'user-1', mccAllowlist: [], paymentProvider: 'STRIPE' },
   };
 }
 
@@ -248,7 +251,7 @@ describe('handleTelegramCallback — approve path', () => {
     });
     mockGetIssuingBalance.mockImplementation(() => {
       callOrder.push('balance');
-      return Promise.resolve({ available: 999_999_99, currency: 'gbp' });
+      return Promise.resolve({ available: 999_999_99, currency: 'eur' });
     });
     mockRecordDecision.mockImplementation(() => {
       callOrder.push('record');
@@ -267,7 +270,7 @@ describe('handleTelegramCallback — approve path', () => {
     const order: string[] = [];
     mockGetIssuingBalance.mockImplementation(() => {
       order.push('getIssuingBalance');
-      return Promise.resolve({ available: 999_999_99, currency: 'gbp' });
+      return Promise.resolve({ available: 999_999_99, currency: 'eur' });
     });
     mockRecordDecision.mockImplementation(() => {
       order.push('recordDecision');
@@ -279,7 +282,7 @@ describe('handleTelegramCallback — approve path', () => {
     });
     mockIssueCard.mockImplementation(() => {
       order.push('issueCard');
-      return Promise.resolve({ stripeCardId: 'ic_t', last4: '4242' });
+      return Promise.resolve({ providerCardId: 'ic_t', last4: '4242' });
     });
     mockMarkCardIssued.mockImplementation(() => {
       order.push('markCardIssued');
@@ -398,7 +401,7 @@ describe('handleTelegramCallback — idempotency guard', () => {
 describe('handleTelegramCallback — insufficient Issuing balance', () => {
   it('does not record decision, reserve, or issue card when Issuing balance is insufficient', async () => {
     seedAwaitingIntent('intent-bal1');
-    mockGetIssuingBalance.mockResolvedValueOnce({ available: 500, currency: 'gbp' });
+    mockGetIssuingBalance.mockResolvedValueOnce({ available: 500, currency: 'eur' });
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-bal1', 'cb-bal1'));
 
@@ -410,7 +413,7 @@ describe('handleTelegramCallback — insufficient Issuing balance', () => {
 
   it('edits message with balance error when insufficient', async () => {
     seedAwaitingIntent('intent-bal2');
-    mockGetIssuingBalance.mockResolvedValueOnce({ available: 500, currency: 'gbp' });
+    mockGetIssuingBalance.mockResolvedValueOnce({ available: 500, currency: 'eur' });
 
     await handleTelegramCallback(makeUpdate('approve', 'intent-bal2', 'cb-bal2'));
 
@@ -424,7 +427,7 @@ describe('handleTelegramCallback — insufficient Issuing balance', () => {
 
   it('does not re-throw — handles gracefully', async () => {
     seedAwaitingIntent('intent-bal3');
-    mockGetIssuingBalance.mockResolvedValueOnce({ available: 0, currency: 'gbp' });
+    mockGetIssuingBalance.mockResolvedValueOnce({ available: 0, currency: 'eur' });
 
     await expect(
       handleTelegramCallback(makeUpdate('approve', 'intent-bal3', 'cb-bal3')),
@@ -469,7 +472,7 @@ describe('handleTelegramCallback — issueVirtualCard failure compensation', () 
     ).rejects.toThrow();
 
     // Re-run with same callbackQueryId — idempotency guard should block it
-    mockIssueCard.mockResolvedValue({ stripeCardId: 'ic_t', last4: '4242' });
+    mockIssueCard.mockResolvedValue({ providerCardId: 'ic_t', last4: '4242' });
     jest.clearAllMocks();
     // Restore the idempotency entry (upsert mock already saved it via the real dbIdempotency object)
     await handleTelegramCallback(makeUpdate('approve', 'intent-idem2', 'cb-idem2'));

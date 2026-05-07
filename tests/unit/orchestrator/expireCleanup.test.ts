@@ -7,6 +7,8 @@ jest.mock('@/db/client', () => ({
 
 jest.mock('@/payments', () => ({
   getPaymentProvider: jest.fn(),
+  getProviderForIntent: jest.fn(),
+  getProviderForUser: jest.fn(),
 }));
 
 jest.mock('@/ledger/potService', () => ({
@@ -19,13 +21,13 @@ jest.mock('@/orchestrator/stateMachine', () => ({
 
 import { expireIntent } from '@/orchestrator/intentService';
 import { prisma } from '@/db/client';
-import { getPaymentProvider } from '@/payments';
+import { getProviderForIntent } from '@/payments';
 import { returnIntent } from '@/ledger/potService';
 import { transitionIntent } from '@/orchestrator/stateMachine';
 import { IntentStatus } from '@/contracts';
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
-const mockGetPaymentProvider = getPaymentProvider as jest.Mock;
+const mockGetProviderForIntent = getProviderForIntent as jest.Mock;
 const mockReturnIntent = returnIntent as jest.Mock;
 const mockTransitionIntent = transitionIntent as jest.Mock;
 
@@ -41,7 +43,7 @@ describe('expireIntent cleanup', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockCancelCard = jest.fn().mockResolvedValue(undefined);
-    mockGetPaymentProvider.mockReturnValue({ cancelCard: mockCancelCard });
+    mockGetProviderForIntent.mockResolvedValue({ cancelCard: mockCancelCard });
     mockTransitionIntent.mockResolvedValue(mockTransitionResult);
     mockReturnIntent.mockResolvedValue(undefined);
   });

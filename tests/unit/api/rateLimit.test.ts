@@ -24,6 +24,7 @@ jest.mock('@/config/env', () => ({
     TELEGRAM_BOT_TOKEN: '',
     TELEGRAM_WEBHOOK_SECRET: 'test-telegram-secret',
     TELEGRAM_TEST_CHAT_ID: '',
+    TELEGRAM_TEST_CHANNEL_ID: '',
     TELEGRAM_MOCK: false,
     PAYMENT_PROVIDER: 'stripe',
   },
@@ -60,12 +61,13 @@ jest.mock('@/ledger/potService', () => ({
   returnIntent: jest.fn().mockResolvedValue(undefined),
 }));
 
-jest.mock('@/payments', () => ({
-  getPaymentProvider: () => ({
+jest.mock('@/payments', () => {
+  const mockProvider = {
+    metadata: { id: 'STRIPE', currency: 'eur' },
     issueCard: jest.fn().mockResolvedValue({
       id: 'vc-1',
       intentId: 'intent-1',
-      stripeCardId: 'ic_test',
+      providerCardId: 'ic_test',
       last4: '4242',
     }),
     revealCard: jest.fn().mockResolvedValue({
@@ -78,8 +80,14 @@ jest.mock('@/payments', () => ({
     freezeCard: jest.fn().mockResolvedValue(undefined),
     cancelCard: jest.fn().mockResolvedValue(undefined),
     handleWebhookEvent: jest.fn().mockResolvedValue(undefined),
-  }),
-}));
+    getIssuingBalance: jest.fn().mockResolvedValue({ available: 999_999_99, currency: 'eur' }),
+  };
+  return {
+    getPaymentProvider: () => mockProvider,
+    getProviderForIntent: () => Promise.resolve(mockProvider),
+    getProviderForUser: () => Promise.resolve(mockProvider),
+  };
+});
 
 jest.mock('@/payments/providers/stripe/stripeClient', () => ({
   getStripeClient: () => ({ webhooks: { constructEvent: jest.fn() } }),
@@ -122,6 +130,7 @@ const dbUsers: Record<string, any> = {
     mccAllowlist: [],
     apiKeyHash: null,
     apiKeyPrefix: TEST_KEY_PREFIX,
+    paymentProvider: 'STRIPE',
   },
 };
 const dbIntents: Record<string, any> = {};

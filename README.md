@@ -1,4 +1,4 @@
-# Trusted Payment Infrastructure for Agents
+# AgentWallet
 
 > The secure payment rail every AI agent runs on. The agent can't spend a cent more than you said.
 
@@ -492,6 +492,10 @@ For the full bot setup and signup flow guide see [docs/telegram-setup.md](docs/t
 
 ## API Reference
 
+For the full human-readable reference — request/response schemas, examples,
+error tables, and an end-to-end curl walkthrough — see
+[docs/api.md](docs/api.md). The tables below are a quick index.
+
 ### User / Intent endpoints
 
 | Method | Path | Auth | Description |
@@ -564,7 +568,8 @@ Copy `.env.example` to `.env` and fill in:
 | `WORKER_API_KEY` | Yes | `local-dev-worker-key` | Shared secret for agent endpoints |
 | `TELEGRAM_BOT_TOKEN` | No | — | Telegram bot token from @BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | No | — | Secret token for Telegram webhook verification |
-| `TELEGRAM_TEST_CHAT_ID` | No | — | Chat ID for local integration smoke tests |
+| `TELEGRAM_TEST_CHAT_ID` | No | — | Chat ID for local integration smoke tests (main bot DM) |
+| `TELEGRAM_TEST_CHANNEL_ID` | No | — | Chat ID of a separate Telegram group for integration test messages; routes live test traffic away from the main bot DM |
 | `PORT` | No | `3000` | HTTP listen port |
 | `NODE_ENV` | No | `development` | `development` / `test` / `production` |
 

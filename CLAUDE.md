@@ -27,7 +27,7 @@ npm install
 # Database
 npm run db:migrate              # run pending migrations
 npm run db:reset                # reset and re-migrate (dev only)
-npm run seed                    # create demo@agentpay.dev (set TELEGRAM_TEST_CHAT_ID in .env to pre-link Telegram)
+npm run seed                    # create demo@agentpay.dev (set TELEGRAM_TEST_CHANNEL_ID or TELEGRAM_TEST_CHAT_ID in .env to pre-link Telegram)
 npx prisma studio               # browse DB in browser
 
 # Dev
@@ -134,7 +134,8 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 WORKER_API_KEY=local-dev-worker-key
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_WEBHOOK_SECRET=...
-TELEGRAM_TEST_CHAT_ID=        # optional, local dev only
+TELEGRAM_TEST_CHAT_ID=        # optional, local dev only — your main bot DM chat ID
+TELEGRAM_TEST_CHANNEL_ID=     # optional, local dev only — separate group for integration test messages
 PORT=3000
 ```
 

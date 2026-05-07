@@ -162,6 +162,7 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
         data: {
           intentId: null,
           actor: user.id,
+          agentId: session.agentId,
           event: 'AGENT_LINKED',
           payload: { agentId: session.agentId, telegramChatId: chatId.toString() },
         },

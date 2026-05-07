@@ -40,7 +40,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockFindUniqueCard.mockResolvedValue({
     intentId: validParams.intentId,
-    stripeCardId: CARD_ID,
+    providerCardId: CARD_ID,
     last4: '4242',
   });
 });
@@ -58,7 +58,7 @@ describe('runSimulatedCheckout — success path', () => {
     expect(result.currency).toBe('eur');
   });
 
-  it('looks up stripeCardId from DB and passes it to the authorization', async () => {
+  it('looks up providerCardId from DB and passes it to the authorization', async () => {
     mockAuthCreate.mockResolvedValue({ id: 'iauth_lookup', approved: true, request_history: [] });
     mockAuthCapture.mockResolvedValue({ id: 'iauth_lookup', status: 'closed' });
 

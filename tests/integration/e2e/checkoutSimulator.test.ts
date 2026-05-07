@@ -103,10 +103,10 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
     intentId = intent.id;
 
     // Issue the virtual card via Stripe Issuing (real API call)
-    await stripeCtx.provider.issueCard(intentId, 100, 'eur');
+    await stripeCtx.provider.issueCard(intentId, 100);
 
     const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
-    stripeCardId = card.stripeCardId;
+    stripeCardId = card.providerCardId;
 
     // Reveal credentials once — stored for all tests in this suite
     const reveal = await stripeCtx.provider.revealCard(intentId);
@@ -128,10 +128,10 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
   // ─── 1. Card issuance + reveal ──────────────────────────────────────────────
 
   describe('card issuance and reveal', () => {
-    it('persists the card in DB with stripeCardId and last4 (no PAN/CVC stored)', async () => {
+    it('persists the card in DB with providerCardId and last4 (no PAN/CVC stored)', async () => {
       const card = await prisma.virtualCard.findUnique({ where: { intentId } });
       expect(card).not.toBeNull();
-      expect(card!.stripeCardId).toMatch(/^ic_/);
+      expect(card!.providerCardId).toMatch(/^ic_/);
       expect(card!.last4).toHaveLength(4);
       expect(card!.revealedAt).not.toBeNull();
       // Confirm PAN is not in the DB row

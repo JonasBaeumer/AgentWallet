@@ -271,6 +271,7 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
         data: expect.objectContaining({
           intentId: null,
           actor: 'user-1',
+          agentId: 'ag_linked',
           event: 'AGENT_UNLINKED',
           payload: expect.objectContaining({ agentId: 'ag_linked' }),
         }),

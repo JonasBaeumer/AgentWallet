@@ -46,6 +46,8 @@ Restart the server after saving: `Ctrl+C` then `npm run dev`.
 
 > `TELEGRAM_TEST_CHAT_ID` is optional — used by Path A below to pre-link your Telegram account to the seeded demo user. Come back here at Path A Step 5.
 
+> `TELEGRAM_TEST_CHANNEL_ID` is optional — a **separate** chat for live integration tests (see [Test Channel Setup](#test-channel-setup) below). When set, all live test messages are routed there instead of your main bot chat, keeping the two conversations cleanly separated.
+
 ---
 
 ## Step 3 — Expose your local server with ngrok
@@ -222,6 +224,33 @@ Once a user is signed up, create an intent and run the stub worker (same as Path
 
 ---
 
+---
+
+## Test Channel Setup
+
+Live integration tests (e.g. `telegramApprovalCheckout`, `menuHandler.live`, `preferences.live`) send real Telegram messages. Without a dedicated test channel those messages land in your main bot conversation and clutter it.
+
+**One Telegram bot, two conversations** — a single bot can send messages to multiple chats. Create a private Telegram group that contains only you and the bot; that group gets its own chat ID and acts as an isolated test inbox.
+
+### Steps
+
+1. Open Telegram and create a new **group** (name it e.g. "AgentPay — Integration Tests").
+2. Add your bot to the group (search by its username).
+3. Find the group's chat ID. The easiest way: add [@userinfobot](https://t.me/userinfobot) to the group, it will print the group's numeric ID, then remove it. Alternatively, check the Telegram API: `GET https://api.telegram.org/bot<TOKEN>/getUpdates` after sending a message to the group.
+4. Add the ID to `.env`:
+   ```
+   TELEGRAM_TEST_CHANNEL_ID=<numeric-group-chat-id>
+   ```
+   Group chat IDs are negative numbers (e.g. `-1001234567890`).
+
+5. Restart the server: `Ctrl+C` then `npm run dev`.
+
+With `TELEGRAM_TEST_CHANNEL_ID` set, all live integration tests route to the group instead of your main bot DM. You still see the Approve/Reject buttons there and can tap them within the 60-second window — the test flow is identical.
+
+> `TELEGRAM_TEST_CHAT_ID` remains the fallback when `TELEGRAM_TEST_CHANNEL_ID` is not set, so existing setups keep working unchanged.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -236,3 +265,5 @@ Once a user is signed up, create an intent and run the stub worker (same as Path
 | `POST /v1/users/:userId/link-telegram` returns 404 | userId is wrong or DB was reset | Re-run `npm run seed` and use the printed userId |
 | `/menu` gives no response | Webhook not registered or server not running | Re-run Step 4; ensure `npm run dev` is running |
 | `/menu` says "sign up first" | No account linked to your chat ID | Run `npm run seed` (with `TELEGRAM_TEST_CHAT_ID` set) or complete the `/start <code>` flow |
+| Live tests still post to my main bot chat | `TELEGRAM_TEST_CHANNEL_ID` not set | Add the group chat ID to `.env` and restart the server |
+| Integration test messages go to the wrong chat | Wrong chat ID value | Group IDs are negative numbers; copy the exact value from `@userinfobot` |

@@ -1,6 +1,12 @@
 import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
+import { logger } from '@/config/logger';
 import type { ReconciliationReport } from '@/contracts';
+
+const log = logger.child({ module: 'payments/stripe/reconciliationService' });
+
+// Safety cap for stripe.issuing.transactions.list pagination.
+const MAX_TRANSACTIONS = 1000;
 
 export async function reconcileIntent(intentId: string): Promise<ReconciliationReport> {
   const pot = await prisma.pot.findUnique({ where: { intentId } });
@@ -15,27 +21,73 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
   };
 
   if (!card) {
-    return { intentId, internal, stripe: null, inSync: true, discrepancies: [] };
+    const discrepancies: string[] = [];
+    const moneyMoved =
+      pot !== null &&
+      (pot.settledAmount > 0 || pot.status === 'SETTLED' || pot.status === 'RETURNED');
+    if (moneyMoved) {
+      discrepancies.push(
+        `virtualCard missing for intent with pot status ${pot!.status} (settledAmount ${pot!.settledAmount})`,
+      );
+    }
+    return {
+      intentId,
+      internal,
+      stripe: null,
+      inSync: discrepancies.length === 0,
+      discrepancies,
+    };
   }
 
   const stripe = getStripeClient();
-  const stripeCard = await stripe.issuing.cards.retrieve(card.stripeCardId);
-  const txList = await stripe.issuing.transactions.list({
-    card: card.stripeCardId,
-    type: 'capture',
-  });
 
-  // Stripe Issuing transactions have negative amounts for captures (debits from
-  // the Issuing balance). Use Math.abs so we can compare against our positive
-  // settledAmount.
-  const totalCaptured = Math.abs(txList.data.reduce((sum, t) => sum + t.amount, 0));
+  let stripeCard;
+  let transactions;
+  try {
+    stripeCard = await stripe.issuing.cards.retrieve(card.providerCardId);
+    transactions = await stripe.issuing.transactions
+      .list({ card: card.providerCardId })
+      .autoPagingToArray({ limit: MAX_TRANSACTIONS });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error(
+      { intentId, providerCardId: card.providerCardId, err },
+      'Stripe API call failed during reconciliation',
+    );
+    return {
+      intentId,
+      internal,
+      stripe: null,
+      inSync: false,
+      discrepancies: [`stripe API error: ${message}`],
+    };
+  }
+
+  // Net captured: Stripe Issuing captures are negative; refunds are positive.
+  let totalCaptured = 0;
+  for (const t of transactions) {
+    const abs = Math.abs(t.amount);
+    if (t.type === 'refund') {
+      totalCaptured -= abs;
+    } else {
+      totalCaptured += abs;
+    }
+  }
+
   const stripeReport = {
     cardStatus: stripeCard.status,
-    transactions: txList.data.map((t) => ({ id: t.id, amount: t.amount, type: t.type })),
+    transactions: transactions.map((t) => ({ id: t.id, amount: t.amount, type: t.type })),
     totalCaptured,
   };
 
   const discrepancies: string[] = [];
+
+  if (transactions.length >= MAX_TRANSACTIONS) {
+    discrepancies.push(
+      `stripe transactions truncated at ${MAX_TRANSACTIONS} — totalCaptured may be incomplete`,
+    );
+  }
+
   if (pot !== null && pot.settledAmount !== totalCaptured) {
     discrepancies.push(`settledAmount ${pot.settledAmount} != stripe captured ${totalCaptured}`);
   }

@@ -11,12 +11,23 @@ export interface TransitionResult {
   newStatus: IntentStatus;
 }
 
+export interface TransitionOptions {
+  actor?: string;
+  agentId?: string;
+}
+
 export async function transitionIntent(
   intentId: string,
   event: IntentEvent,
   payload: Record<string, unknown> = {},
-  actor: string = 'system',
+  options: TransitionOptions = {},
 ): Promise<TransitionResult> {
+  // When an agent triggers the transition, attribute the audit event to the agent:
+  // actor is the free-form subject string (agentId takes priority), agentId is the
+  // typed column kept in sync for querying/analytics.
+  const agentId = options.agentId;
+  const actor = options.actor ?? agentId ?? 'system';
+
   return await prisma.$transaction(async (tx) => {
     const intent = await tx.purchaseIntent.findUnique({ where: { id: intentId } });
     if (!intent) throw new IntentNotFoundError(intentId);
@@ -33,12 +44,13 @@ export async function transitionIntent(
       data: {
         intentId,
         actor,
+        agentId: agentId ?? null,
         event,
         payload: { previousStatus, newStatus, ...payload } as any,
       },
     });
 
-    log.info({ intentId, event, previousStatus, newStatus, actor }, 'Intent transition');
+    log.info({ intentId, event, previousStatus, newStatus, actor, agentId }, 'Intent transition');
 
     return {
       intent: updated as unknown as PurchaseIntentData,

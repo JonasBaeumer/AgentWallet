@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { workerAuthMiddleware } from '@/api/middleware/auth';
+import { agentContextHook } from '@/api/middleware/agentContext';
 import { agentQuoteSchema, agentResultSchema, agentRegisterSchema } from '@/api/validators/agent';
 import { IntentStatus } from '@/contracts';
 import {
@@ -10,7 +11,7 @@ import {
   failCheckout,
 } from '@/orchestrator/intentService';
 import { settleIntent, returnIntent } from '@/ledger/potService';
-import { getPaymentProvider } from '@/payments';
+import { getProviderForIntent } from '@/payments';
 import { prisma } from '@/db/client';
 import { sendApprovalRequest } from '@/telegram/notificationService';
 
@@ -26,6 +27,10 @@ function generatePairingCode(): string {
 }
 
 export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
+  // Enrich req.log with { agentId, intentId, route } and expose req.agentId to all handlers
+  // in this plugin scope. Runs after workerAuth so auth failures short-circuit first.
+  fastify.addHook('preHandler', agentContextHook);
+
   // POST /v1/agent/quote — worker posts search result
   // Flow: SEARCHING → QUOTED → AWAITING_APPROVAL
   fastify.post(
@@ -49,10 +54,10 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // SEARCHING → QUOTED (stores quote data in metadata via orchestrator)
-      await receiveQuote(intentId, { merchantName, merchantUrl, price, currency });
+      await receiveQuote(intentId, { merchantName, merchantUrl, price, currency }, request.agentId);
 
       // QUOTED → AWAITING_APPROVAL
-      await requestApproval(intentId);
+      await requestApproval(intentId, request.agentId);
 
       // Fire-and-forget Telegram notification — must not block the HTTP response
       sendApprovalRequest(intentId).catch((err: unknown) =>
@@ -91,17 +96,21 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       if (success) {
-        await completeCheckout(intentId, actualAmount ?? 0);
+        await completeCheckout(intentId, actualAmount ?? 0, request.agentId);
         await settleIntent(intentId, actualAmount ?? 0);
       } else {
-        await failCheckout(intentId, errorMessage ?? 'Checkout failed');
+        await failCheckout(intentId, errorMessage ?? 'Checkout failed', request.agentId);
         await returnIntent(intentId);
       }
 
-      // Cancel the virtual card — one purchase, one card (best-effort)
-      await getPaymentProvider()
-        .cancelCard(intentId)
-        .catch(() => {});
+      // Cancel the virtual card — one purchase, one card (best-effort).
+      // Failures must not block the agent response, but a swallowed error can
+      // leave a live card on Stripe — log so it shows up in oncall.
+      await getProviderForIntent(intentId)
+        .then((p) => p.cancelCard(intentId))
+        .catch((err: unknown) => {
+          fastify.log.warn({ intentId, err }, 'Failed to cancel virtual card after agent result');
+        });
 
       // Store receipt/error info in metadata
       await prisma.purchaseIntent.update({
@@ -189,13 +198,14 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       const { intentId } = request.params;
 
       try {
-        const reveal = await getPaymentProvider().revealCard(intentId);
+        const provider = await getProviderForIntent(intentId);
+        const reveal = await provider.revealCard(intentId);
         return reply.send({ intentId, ...reveal });
       } catch (err: any) {
         if (err.name === 'CardAlreadyRevealedError') {
           return reply.status(409).send({ error: 'Card has already been revealed' });
         }
-        if (err.name === 'IntentNotFoundError') {
+        if (err.name === 'IntentNotFoundError' || err.code === 'P2025') {
           return reply.status(404).send({ error: `No card found for intent: ${intentId}` });
         }
         throw err;
@@ -282,7 +292,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: workerAuthMiddleware,
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const agentId = request.headers['x-agent-id'] as string | undefined;
+      const agentId = request.agentId;
       if (!agentId) {
         return reply.status(400).send({ error: 'Missing X-Agent-Id header' });
       }

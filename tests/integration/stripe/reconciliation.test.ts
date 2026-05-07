@@ -8,10 +8,12 @@
  *   npm run test:integration -- --testPathPattern=reconciliation
  */
 
+import crypto from 'crypto';
 import type Stripe from 'stripe';
 import { prisma } from '@/db/client';
 import { reconcileIntent } from '@/payments/providers/stripe/reconciliationService';
 import { getStripeClient } from '@/payments/providers/stripe/stripeClient';
+import { PaymentProvider } from '@/contracts';
 
 jest.setTimeout(60_000);
 
@@ -29,12 +31,11 @@ describeIfStripe('Reconciliation integration', () => {
     // Use the singleton so we inherit maxNetworkRetries: 3 (matches prod).
     stripe = getStripeClient();
 
-    // Create minimal DB records
     const user = await prisma.user.create({
       data: {
         email: `recon-test-${Date.now()}@example.com`,
         telegramChatId: null,
-        stripeCardholderId: null,
+        providerCardholderId: null,
       },
     });
     userId = user.id;
@@ -44,14 +45,13 @@ describeIfStripe('Reconciliation integration', () => {
         userId,
         query: 'reconciliation test product',
         maxBudget: 5000,
-        currency: 'gbp',
+        currency: 'eur',
         status: 'DONE',
-        idempotencyKey: `recon-test-${Date.now()}`,
+        idempotencyKey: `recon-test-${crypto.randomUUID()}`,
       },
     });
     intentId = intent.id;
 
-    // Create Stripe cardholder and card
     const cardholder = await stripe.issuing.cardholders.create({
       name: 'Recon Test',
       email: `recon-stripe-${Date.now()}@example.com`,
@@ -79,9 +79,13 @@ describeIfStripe('Reconciliation integration', () => {
     });
     cardId = card.id;
 
-    // Write VirtualCard to DB
     await prisma.virtualCard.create({
-      data: { intentId, stripeCardId: cardId, last4: card.last4 },
+      data: {
+        intentId,
+        provider: PaymentProvider.STRIPE,
+        providerCardId: cardId,
+        last4: card.last4,
+      },
     });
 
     // Stripe test mode: freshly created individual cardholders need ~2-3s for
@@ -97,10 +101,8 @@ describeIfStripe('Reconciliation integration', () => {
       merchant_data: { name: 'Test Merchant' },
     });
 
-    // Cancel the card (mirrors what the system does post-checkout)
     await stripe.issuing.cards.update(cardId, { status: 'canceled' });
 
-    // Write matching ledger records
     await prisma.pot.create({
       data: { userId, intentId, reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' },
     });
@@ -132,7 +134,6 @@ describeIfStripe('Reconciliation integration', () => {
   });
 
   it('returns inSync:false with discrepancy when settledAmount is wrong', async () => {
-    // Corrupt the pot
     await prisma.pot.update({
       where: { intentId },
       data: { settledAmount: 9999 },
@@ -143,7 +144,6 @@ describeIfStripe('Reconciliation integration', () => {
     expect(report.inSync).toBe(false);
     expect(report.discrepancies.some((d) => d.includes('9999'))).toBe(true);
 
-    // Restore
     await prisma.pot.update({
       where: { intentId },
       data: { settledAmount: 3500 },

@@ -81,7 +81,7 @@ jest.mock('@/ledger/potService', () => ({
 const mockIssueVirtualCard = jest.fn().mockResolvedValue({
   id: 'vc-1',
   intentId: 'intent-1',
-  stripeCardId: 'ic_test',
+  providerCardId: 'ic_test',
   last4: '4242',
 });
 const mockRevealCard = jest.fn().mockResolvedValue({
@@ -94,8 +94,9 @@ const mockRevealCard = jest.fn().mockResolvedValue({
 const mockCancelCard = jest.fn().mockResolvedValue(undefined);
 const mockGetIssuingBalance = jest
   .fn()
-  .mockResolvedValue({ available: 999_999_99, currency: 'gbp' });
+  .mockResolvedValue({ available: 999_999_99, currency: 'eur' });
 const mockPaymentProvider = {
+  metadata: { id: 'STRIPE', currency: 'eur' },
   issueCard: mockIssueVirtualCard,
   revealCard: mockRevealCard,
   freezeCard: jest.fn().mockResolvedValue(undefined),
@@ -105,6 +106,8 @@ const mockPaymentProvider = {
 };
 jest.mock('@/payments', () => ({
   getPaymentProvider: () => mockPaymentProvider,
+  getProviderForIntent: () => Promise.resolve(mockPaymentProvider),
+  getProviderForUser: () => Promise.resolve(mockPaymentProvider),
 }));
 
 // Stripe (needed by webhooks route import chain)
@@ -134,6 +137,7 @@ const dbUsers: Record<string, any> = {
     mccAllowlist: [],
     apiKeyHash: null,
     apiKeyPrefix: TEST_KEY_PREFIX,
+    paymentProvider: 'STRIPE',
   },
 };
 const dbIntents: Record<string, any> = {};
@@ -299,7 +303,7 @@ describe('POST /v1/intents wiring', () => {
       userId: 'user-1',
       query: 'Sony headphones',
       maxBudget: 30000,
-      currency: 'gbp',
+      currency: 'eur',
     });
     expect(payload.intentId).toBe(intentId);
   });
@@ -359,8 +363,38 @@ describe('POST /v1/agent/quote wiring', () => {
         merchantUrl: 'https://amazon.co.uk',
         price: 9999,
       }),
+      undefined,
     );
-    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1');
+    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1', undefined);
+  });
+
+  it('propagates X-Agent-Id header to receiveQuote and requestApproval', async () => {
+    seedSearchingIntent('intent-q-agent');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: {
+        'content-type': 'application/json',
+        'x-worker-key': 'test-worker-key',
+        'x-agent-id': 'ag_from_header',
+      },
+      body: JSON.stringify({
+        intentId: 'intent-q-agent',
+        merchantName: 'X',
+        merchantUrl: 'https://x.com',
+        price: 100,
+        currency: 'gbp',
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockReceiveQuote).toHaveBeenCalledWith(
+      'intent-q-agent',
+      expect.any(Object),
+      'ag_from_header',
+    );
+    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q-agent', 'ag_from_header');
   });
 
   it('does NOT call receiveQuote for non-SEARCHING intent', async () => {
@@ -415,9 +449,14 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
       userId: 'user-1',
       status: IntentStatus.AWAITING_APPROVAL,
       maxBudget: 10000,
-      currency: 'gbp',
+      currency: 'eur',
       metadata: { merchantName: 'Amazon UK', merchantUrl: 'https://amazon.co.uk', price: 9999 },
-      user: { id: 'user-1', email: 'test@agentpay.dev', mccAllowlist: [] },
+      user: {
+        id: 'user-1',
+        email: 'test@agentpay.dev',
+        mccAllowlist: [],
+        paymentProvider: 'STRIPE',
+      },
     };
   }
 
@@ -474,12 +513,7 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
       body: JSON.stringify({ decision: 'APPROVED', actorId: 'user-1' }),
     });
 
-    expect(mockIssueVirtualCard).toHaveBeenCalledWith(
-      'intent-a3',
-      10000,
-      'gbp',
-      expect.any(Object),
-    );
+    expect(mockIssueVirtualCard).toHaveBeenCalledWith('intent-a3', 10000, expect.any(Object));
   });
 
   it('calls markCardIssued and startCheckout via orchestrator', async () => {
@@ -519,7 +553,7 @@ describe('POST /v1/approvals/:id/decision wiring — APPROVED', () => {
       expect.objectContaining({
         intentId: 'intent-a5',
         userId: 'user-1',
-        stripeCardId: 'ic_test',
+        providerCardId: 'ic_test',
         last4: '4242',
       }),
     );
@@ -686,7 +720,7 @@ describe('POST /v1/agent/result wiring — success', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-r1', 8000);
+    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-r1', 8000, undefined);
     expect(mockSettleIntent).toHaveBeenCalledWith('intent-r1', 8000);
     expect(mockFailCheckout).not.toHaveBeenCalled();
     expect(mockReturnIntent).not.toHaveBeenCalled();
@@ -739,10 +773,27 @@ describe('POST /v1/agent/result wiring — failure', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f1', 'Payment declined');
+    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f1', 'Payment declined', undefined);
     expect(mockReturnIntent).toHaveBeenCalledWith('intent-f1');
     expect(mockCompleteCheckout).not.toHaveBeenCalled();
     expect(mockSettleIntent).not.toHaveBeenCalled();
+  });
+
+  it('propagates X-Agent-Id header to failCheckout', async () => {
+    seedRunningIntent('intent-f-agent');
+
+    await app.inject({
+      method: 'POST',
+      url: '/v1/agent/result',
+      headers: {
+        'content-type': 'application/json',
+        'x-worker-key': 'test-worker-key',
+        'x-agent-id': 'ag_from_header',
+      },
+      body: JSON.stringify({ intentId: 'intent-f-agent', success: false, errorMessage: 'nope' }),
+    });
+
+    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f-agent', 'nope', 'ag_from_header');
   });
 
   it('calls cancelCard after failed checkout', async () => {
@@ -835,7 +886,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
   }
 
   function _makeCard(intentId: string, revealedAt: Date | null = null) {
-    return { id: 'vc-1', intentId, stripeCardId: 'ic_test', last4: '4242', revealedAt };
+    return { id: 'vc-1', intentId, providerCardId: 'ic_test', last4: '4242', revealedAt };
   }
 
   it('returns 401 without X-Worker-Key header', async () => {
