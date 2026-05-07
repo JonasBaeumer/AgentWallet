@@ -141,9 +141,7 @@ describeIfTelegram('Telegram Bot API infrastructure', () => {
             );
           }
         : () => {
-            console.log(
-              'Step 3.1 skipped — set TELEGRAM_TEST_CHAT_ID in .env to enable',
-            );
+            console.log('Step 3.1 skipped — set TELEGRAM_TEST_CHAT_ID in .env to enable');
           },
     );
 

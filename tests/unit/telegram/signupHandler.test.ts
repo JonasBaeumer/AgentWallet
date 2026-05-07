@@ -31,16 +31,22 @@ jest.mock('@/db/client', () => ({
 // Mock Telegram bot — sendMessage returns an incrementing message_id so tests
 // can assert which ids end up in the cleanup queue.
 let _mockMsgId = 100;
-const mockSendMessage = jest.fn().mockImplementation(() => Promise.resolve({ message_id: ++_mockMsgId }));
+const mockSendMessage = jest
+  .fn()
+  .mockImplementation(() => Promise.resolve({ message_id: ++_mockMsgId }));
 const mockDeleteMessage = jest.fn().mockResolvedValue(true);
 jest.mock('@/telegram/telegramClient', () => ({
-  getTelegramBot: () => ({ api: { sendMessage: mockSendMessage, deleteMessage: mockDeleteMessage } }),
+  getTelegramBot: () => ({
+    api: { sendMessage: mockSendMessage, deleteMessage: mockDeleteMessage },
+  }),
 }));
 
 // Mock session store — back the get/set with an in-memory map so the helpers
 // in signupHandler.ts (which read-modify-write the session) behave realistically.
 const sessionMap = new Map<string, any>();
-const mockGetSession = jest.fn(async (chatId: number | string) => sessionMap.get(String(chatId)) ?? null);
+const mockGetSession = jest.fn(
+  async (chatId: number | string) => sessionMap.get(String(chatId)) ?? null,
+);
 const mockSetSession = jest.fn(async (chatId: number | string, session: any) => {
   sessionMap.set(String(chatId), session);
 });
@@ -81,7 +87,9 @@ beforeEach(() => {
   _mockMsgId = 100;
   // Re-install the map-backed impls — earlier tests may have replaced them with
   // .mockResolvedValue(constant), and jest.clearAllMocks only clears calls, not impls.
-  mockGetSession.mockImplementation(async (cid: number | string) => sessionMap.get(String(cid)) ?? null);
+  mockGetSession.mockImplementation(
+    async (cid: number | string) => sessionMap.get(String(cid)) ?? null,
+  );
   mockSetSession.mockImplementation(async (cid: number | string, session: any) => {
     sessionMap.set(String(cid), session);
   });
@@ -408,9 +416,14 @@ describe('ephemeral setup-message cleanup', () => {
       messageIds: [11, 12, 13],
     });
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: null,
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: null,
     });
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'user-new', email: 'alice@example.com' });
+    (mockPrisma.user.create as jest.Mock).mockResolvedValue({
+      id: 'user-new',
+      email: 'alice@example.com',
+    });
     (mockPrisma.pairingCode.update as jest.Mock).mockResolvedValue({});
 
     await handleTelegramMessage(userMsg('alice@example.com', 14));
@@ -429,9 +442,14 @@ describe('ephemeral setup-message cleanup', () => {
       messageIds: [21, 22],
     });
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: null,
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: null,
     });
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'user-new', email: 'alice@example.com' });
+    (mockPrisma.user.create as jest.Mock).mockResolvedValue({
+      id: 'user-new',
+      email: 'alice@example.com',
+    });
     (mockPrisma.pairingCode.update as jest.Mock).mockResolvedValue({});
 
     await handleTelegramMessage(userMsg('alice@example.com', 23));
@@ -479,9 +497,14 @@ describe('ephemeral setup-message cleanup', () => {
       messageIds: [41, 42, 43],
     });
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
-      code: 'ABCD1234', agentId: 'ag_test', claimedByUserId: null,
+      code: 'ABCD1234',
+      agentId: 'ag_test',
+      claimedByUserId: null,
     });
-    (mockPrisma.user.create as jest.Mock).mockResolvedValue({ id: 'user-new', email: 'alice@example.com' });
+    (mockPrisma.user.create as jest.Mock).mockResolvedValue({
+      id: 'user-new',
+      email: 'alice@example.com',
+    });
     (mockPrisma.pairingCode.update as jest.Mock).mockResolvedValue({});
 
     // Make the second delete reject
