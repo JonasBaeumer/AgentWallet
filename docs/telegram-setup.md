@@ -1,16 +1,8 @@
 # Telegram Approval Setup
 
-This guide sets up the Telegram bot so users can approve or reject purchase requests from their phone.
+This guide sets up the Telegram bot so users can approve or reject purchase requests from their phone. There is one onboarding path: every user — including local testers — pairs via `/start <code>` in Telegram.
 
-There are **two testing paths** — Steps 1–4 are shared, then you choose:
-
-| | Path A — Seeded user | Path B — Full OpenClaw |
-|---|---|---|
-| **Best for** | Solo testing, no OpenClaw running | End-to-end integration testing |
-| **User created by** | `npm run seed` or `link-telegram` endpoint | OpenClaw pairing flow |
-| **Requires OpenClaw?** | No | Yes |
-
-Steps 1–4 (bot, ngrok, webhook) are identical for both paths. At Step 5, choose the path that fits your situation.
+> **Setup messages are ephemeral.** During signup the bot sends a few prompts (confirmation, email, success/API key). Once signup completes successfully, all of these messages are deleted automatically so the chat retains only operational notifications (approval requests, the main menu). **Save your API key immediately** — it is shown once, then the message is removed.
 
 See [docs/openclaw.md](openclaw.md) for the full OpenClaw integration guide.
 
@@ -43,10 +35,6 @@ TELEGRAM_WEBHOOK_SECRET=<any random string you choose, e.g. my-secret-123>
 ```
 
 Restart the server after saving: `Ctrl+C` then `npm run dev`.
-
-> `TELEGRAM_TEST_CHAT_ID` is optional — used by Path A below to pre-link your Telegram account to the seeded demo user. Come back here at Path A Step 5.
-
-> `TELEGRAM_TEST_CHANNEL_ID` is optional — a **separate** chat for live integration tests (see [Test Channel Setup](#test-channel-setup) below). When set, all live test messages are routed there instead of your main bot chat, keeping the two conversations cleanly separated.
 
 ---
 
@@ -98,41 +86,44 @@ You should see: `{"ok":true,"result":true,"description":"Webhook was set"}`
 
 ---
 
-## Choose your path
+## Step 5 — Sign up via `/start <code>`
+
+Users (including local testers) are created through the OpenClaw-initiated pairing flow — **not** through any manual admin step.
+
+**What OpenClaw does (once, on first run):**
+
+```bash
+curl -X POST http://localhost:3000/v1/agent/register \
+  -H "X-Worker-Key: local-dev-worker-key"
+# → { "agentId": "ag_abc123", "pairingCode": "AB3X9K2M", "expiresAt": "..." }
+```
+
+OpenClaw stores the `agentId` permanently and gives the user the pairing code along with the bot username.
+
+**What the user does in Telegram:**
+
+1. Open the bot (search for your bot's username, e.g. `@agentpay_dev_bot`)
+2. Send: `/start AB3X9K2M` (with the code from OpenClaw)
+3. The bot shows a confirmation prompt with Confirm / Cancel buttons. Tap **Confirm**.
+4. The bot asks for your email address. Reply with it.
+5. The bot replies with your API key. **Copy it now** — it is shown once and the message is then deleted along with the rest of the signup flow. The main menu appears as the persistent landing message.
+
+After this, OpenClaw can resolve the `userId`:
+
+```bash
+curl http://localhost:3000/v1/agent/user \
+  -H "X-Worker-Key: local-dev-worker-key" \
+  -H "X-Agent-Id: ag_abc123"
+# → { "status": "claimed", "userId": "clxyz..." }
+```
+
+The pairing code is valid for 30 minutes. If it expires before the user signs up, OpenClaw calls `POST /v1/agent/register` again with `{ "agentId": "ag_abc123" }` to get a fresh code.
+
+> **Local testing without OpenClaw?** Run `npm run seed` to create the `demo@agentpay.dev` user, then call `POST /v1/agent/register` directly with `curl` to get a pairing code and complete the same `/start <code>` flow above.
 
 ---
 
-## Path A — Seeded user, no OpenClaw (fastest for solo testing)
-
-### Step 5A — Link your Telegram account to the demo user
-
-**Option 1: use `npm run seed` (recommended for first-time setup)**
-
-1. Find your Telegram chat ID. The easiest way: message [@userinfobot](https://t.me/userinfobot) and it replies with your numeric ID.
-2. Add it to `.env`:
-   ```
-   TELEGRAM_TEST_CHAT_ID=<your-numeric-chat-id>
-   ```
-3. Run the seed:
-   ```bash
-   npm run seed
-   ```
-   This upserts the `demo@agentpay.dev` user and sets `telegramChatId` to your value. The `userId` is printed to stdout — save it.
-
-**Option 2: link an existing user (skip re-seeding)**
-
-If you already have a `userId` from a prior run and just want to update the chat ID, use the `link-telegram` endpoint directly:
-
-```bash
-curl -X POST http://localhost:3000/v1/users/<userId>/link-telegram \
-  -H "Content-Type: application/json" \
-  -d '{"telegramChatId": "<your-chat-id>"}'
-# → {"userId":"...","telegramChatId":"...","linked":true}
-```
-
-Errors: `400` (missing or invalid body), `404` (userId not found — re-run `npm run seed`). No auth required.
-
-### Step 6A — Explore the menu
+## Step 6 — Explore the menu
 
 Once your account is linked, send `/menu` to the bot. You'll see an inline keyboard:
 
@@ -148,16 +139,18 @@ Once your account is linked, send `/menu` to the bot. You'll see an inline keybo
 | 📋 History | Last 5 completed purchases |
 | 🚫 Cancel Intent | Active intents you can cancel (tap one to confirm) |
 | 🔗 Agent Status | Which agent is linked to your account |
-| ⚙️ Preferences | Coming soon (card TTL / cancel policy) |
+| ⚙️ Preferences | Card TTL / cancel policy |
 
 Every screen has a ⬅️ Back button that returns to the main menu.
 
 > If you haven't signed up yet, `/menu` replies with a prompt to run `/start <code>` first.
 
-### Step 7A — Test an approval
+---
+
+## Step 7 — Test an approval
 
 ```bash
-# Create an intent (use the userId from Step 5A)
+# Create an intent (use the userId returned by GET /v1/agent/user above)
 curl -X POST http://localhost:3000/v1/intents \
   -H "Content-Type: application/json" \
   -H "X-Idempotency-Key: test-1" \
@@ -183,74 +176,6 @@ Tap ✅ Approve — the intent moves to `CHECKOUT_RUNNING` and the message updat
 
 ---
 
-## Path B — Full OpenClaw + Telegram
-
-Users are created through the OpenClaw-initiated pairing flow — **not** through any manual admin step.
-
-### Step 5B — User signup via OpenClaw
-
-**What OpenClaw does (once, on first run):**
-
-```bash
-curl -X POST http://localhost:3000/v1/agent/register \
-  -H "X-Worker-Key: local-dev-worker-key"
-# → { "agentId": "ag_abc123", "pairingCode": "AB3X9K2M", "expiresAt": "..." }
-```
-
-OpenClaw stores the `agentId` permanently and gives the user the pairing code along with the bot username.
-
-**What the user does in Telegram:**
-
-1. Open the bot (search for your bot's username, e.g. `@agentpay_dev_bot`)
-2. Send: `/start AB3X9K2M` (with the code from OpenClaw)
-3. The bot replies: *"What email address should we use for your account?"*
-4. Reply with your email address
-5. The bot confirms: *"✅ Account created! Your OpenClaw is now linked."*
-
-After this, OpenClaw can resolve the `userId`:
-
-```bash
-curl http://localhost:3000/v1/agent/user \
-  -H "X-Worker-Key: local-dev-worker-key" \
-  -H "X-Agent-Id: ag_abc123"
-# → { "status": "claimed", "userId": "clxyz..." }
-```
-
-The pairing code is valid for 30 minutes. If it expires before the user signs up, OpenClaw calls `POST /v1/agent/register` again with `{ "agentId": "ag_abc123" }` to get a fresh code.
-
-### Step 6B — Test it
-
-Once a user is signed up, create an intent and run the stub worker (same as Path A Step 6A above).
-
----
-
----
-
-## Test Channel Setup
-
-Live integration tests (e.g. `telegramApprovalCheckout`, `menuHandler.live`, `preferences.live`) send real Telegram messages. Without a dedicated test channel those messages land in your main bot conversation and clutter it.
-
-**One Telegram bot, two conversations** — a single bot can send messages to multiple chats. Create a private Telegram group that contains only you and the bot; that group gets its own chat ID and acts as an isolated test inbox.
-
-### Steps
-
-1. Open Telegram and create a new **group** (name it e.g. "AgentPay — Integration Tests").
-2. Add your bot to the group (search by its username).
-3. Find the group's chat ID. The easiest way: add [@userinfobot](https://t.me/userinfobot) to the group, it will print the group's numeric ID, then remove it. Alternatively, check the Telegram API: `GET https://api.telegram.org/bot<TOKEN>/getUpdates` after sending a message to the group.
-4. Add the ID to `.env`:
-   ```
-   TELEGRAM_TEST_CHANNEL_ID=<numeric-group-chat-id>
-   ```
-   Group chat IDs are negative numbers (e.g. `-1001234567890`).
-
-5. Restart the server: `Ctrl+C` then `npm run dev`.
-
-With `TELEGRAM_TEST_CHANNEL_ID` set, all live integration tests route to the group instead of your main bot DM. You still see the Approve/Reject buttons there and can tap them within the 60-second window — the test flow is identical.
-
-> `TELEGRAM_TEST_CHAT_ID` remains the fallback when `TELEGRAM_TEST_CHANNEL_ID` is not set, so existing setups keep working unchanged.
-
----
-
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -262,8 +187,6 @@ With `TELEGRAM_TEST_CHANNEL_ID` set, all live integration tests route to the gro
 | Buttons do nothing | Webhook not registered or ngrok restarted | Re-run Step 4 with the current ngrok URL |
 | `401` on webhook endpoint | Wrong `TELEGRAM_WEBHOOK_SECRET` | Ensure `.env` value matches the `secret_token` in Step 4 |
 | ngrok auth error | No authtoken configured | Run `ngrok config add-authtoken <token>` |
-| `POST /v1/users/:userId/link-telegram` returns 404 | userId is wrong or DB was reset | Re-run `npm run seed` and use the printed userId |
 | `/menu` gives no response | Webhook not registered or server not running | Re-run Step 4; ensure `npm run dev` is running |
-| `/menu` says "sign up first" | No account linked to your chat ID | Run `npm run seed` (with `TELEGRAM_TEST_CHAT_ID` set) or complete the `/start <code>` flow |
-| Live tests still post to my main bot chat | `TELEGRAM_TEST_CHANNEL_ID` not set | Add the group chat ID to `.env` and restart the server |
-| Integration test messages go to the wrong chat | Wrong chat ID value | Group IDs are negative numbers; copy the exact value from `@userinfobot` |
+| `/menu` says "sign up first" | No account linked to your chat ID | Complete the `/start <code>` flow above |
+| Lost your API key | The success message was deleted as part of signup cleanup | Save the key the moment it appears. To recover: re-run `npm run seed` (rotates the demo user's key) or re-pair from a fresh `/v1/agent/register`. |
