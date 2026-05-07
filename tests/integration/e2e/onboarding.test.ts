@@ -17,7 +17,9 @@ import { getRedisClient, disconnectRedis } from '@/config/redis';
 // Mock Telegram outbound calls only — we don't send real Telegram messages during tests.
 // sendMessage returns an incrementing message_id so the cleanup pass has unique ids to delete.
 let _e2eMsgId = 1000;
-const mockSendMessage = jest.fn().mockImplementation(() => Promise.resolve({ message_id: ++_e2eMsgId }));
+const mockSendMessage = jest
+  .fn()
+  .mockImplementation(() => Promise.resolve({ message_id: ++_e2eMsgId }));
 const mockAnswerCallbackQuery = jest.fn().mockResolvedValue(undefined);
 const mockEditMessageText = jest.fn().mockResolvedValue(undefined);
 const mockDeleteMessage = jest.fn().mockResolvedValue(true);
@@ -179,23 +181,30 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     await new Promise((r) => setTimeout(r, 300));
 
     // Bot should have confirmed account creation (message includes API key)
-    expect(mockSendMessage).toHaveBeenCalledWith(chatId, expect.stringContaining('Account created'), expect.any(Object));
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      chatId,
+      expect.stringContaining('Account created'),
+      expect.any(Object),
+    );
 
     // Cleanup should have deleted every tracked setup message after the success message was sent.
     // At minimum: the user's /start message, the bot confirmation, the user's email reply, and the success message.
     expect(mockDeleteMessage).toHaveBeenCalled();
     expect(mockDeleteMessage.mock.calls.length).toBeGreaterThanOrEqual(4);
     const lastSendOrder = Math.max(
-      ...mockSendMessage.mock.invocationCallOrder.filter((_, i) =>
-        typeof mockSendMessage.mock.calls[i][1] === 'string' &&
-        (mockSendMessage.mock.calls[i][1] as string).includes('Account created'),
+      ...mockSendMessage.mock.invocationCallOrder.filter(
+        (_, i) =>
+          typeof mockSendMessage.mock.calls[i][1] === 'string' &&
+          (mockSendMessage.mock.calls[i][1] as string).includes('Account created'),
       ),
     );
     const firstDeleteOrder = mockDeleteMessage.mock.invocationCallOrder[0];
     expect(firstDeleteOrder).toBeGreaterThan(lastSendOrder);
 
     // TELEGRAM_SETUP_CLEANED audit event should have been emitted alongside AGENT_LINKED
-    const auditEvents = await prisma.auditEvent.findMany({ where: { event: 'TELEGRAM_SETUP_CLEANED' } });
+    const auditEvents = await prisma.auditEvent.findMany({
+      where: { event: 'TELEGRAM_SETUP_CLEANED' },
+    });
     expect(auditEvents.length).toBe(1);
 
     // Verify user exists in DB with correct fields

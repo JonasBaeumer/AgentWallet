@@ -31,9 +31,10 @@ async function sendEphemeral(
   opts?: SendMessageOpts,
 ): Promise<number> {
   const bot = getTelegramBot();
-  const msg = opts === undefined
-    ? await bot.api.sendMessage(chatId, text)
-    : await bot.api.sendMessage(chatId, text, opts);
+  const msg =
+    opts === undefined
+      ? await bot.api.sendMessage(chatId, text)
+      : await bot.api.sendMessage(chatId, text, opts);
   await appendSignupMessageId(chatId, msg.message_id);
   return msg.message_id;
 }
@@ -252,15 +253,17 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
     await clearSignupSession(chatId);
     const deleted = await cleanupSignupMessages(chatId, finalSession);
 
-    await prisma.auditEvent.create({
-      data: {
-        intentId: null,
-        actor: result.user.id,
-        agentId: session.agentId,
-        event: 'TELEGRAM_SETUP_CLEANED',
-        payload: { messageCount: deleted },
-      },
-    }).catch((err) => log.error({ err }, 'Failed to record TELEGRAM_SETUP_CLEANED audit event'));
+    await prisma.auditEvent
+      .create({
+        data: {
+          intentId: null,
+          actor: result.user.id,
+          agentId: session.agentId,
+          event: 'TELEGRAM_SETUP_CLEANED',
+          payload: { messageCount: deleted },
+        },
+      })
+      .catch((err) => log.error({ err }, 'Failed to record TELEGRAM_SETUP_CLEANED audit event'));
 
     await sendMainMenu(chatId);
   } catch (err: any) {
