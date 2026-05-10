@@ -41,9 +41,11 @@ jest.mock('@/telegram/telegramClient', () => ({
   }),
 }));
 
-// Mock session store — back the get/set with an in-memory map so the helpers
-// in signupHandler.ts (which read-modify-write the session) behave realistically.
+// Mock session store — back get/set with an in-memory map and the messageIds
+// list with a separate map (mirroring the production split into a separate
+// Redis list).
 const sessionMap = new Map<string, any>();
+const messageIdsMap = new Map<string, number[]>();
 const mockGetSession = jest.fn(
   async (chatId: number | string) => sessionMap.get(String(chatId)) ?? null,
 );
@@ -52,11 +54,23 @@ const mockSetSession = jest.fn(async (chatId: number | string, session: any) => 
 });
 const mockClearSession = jest.fn(async (chatId: number | string) => {
   sessionMap.delete(String(chatId));
+  messageIdsMap.delete(String(chatId));
 });
+const mockAppendMessageId = jest.fn(async (chatId: number | string, messageId: number) => {
+  const key = String(chatId);
+  const list = messageIdsMap.get(key) ?? [];
+  list.push(messageId);
+  messageIdsMap.set(key, list);
+});
+const mockGetMessageIds = jest.fn(
+  async (chatId: number | string) => messageIdsMap.get(String(chatId)) ?? [],
+);
 jest.mock('@/telegram/sessionStore', () => ({
   getSignupSession: (...args: any[]) => mockGetSession(...args),
   setSignupSession: (...args: any[]) => mockSetSession(...args),
   clearSignupSession: (...args: any[]) => mockClearSession(...args),
+  appendSignupMessageId: (...args: any[]) => mockAppendMessageId(...args),
+  getSignupMessageIds: (...args: any[]) => mockGetMessageIds(...args),
   getPrefSession: jest.fn().mockResolvedValue(null),
   setPrefSession: jest.fn(),
   clearPrefSession: jest.fn(),
@@ -84,6 +98,7 @@ function makeUpdate(text: string) {
 beforeEach(() => {
   jest.clearAllMocks();
   sessionMap.clear();
+  messageIdsMap.clear();
   _mockMsgId = 100;
   // Re-install the map-backed impls — earlier tests may have replaced them with
   // .mockResolvedValue(constant), and jest.clearAllMocks only clears calls, not impls.
@@ -95,7 +110,17 @@ beforeEach(() => {
   });
   mockClearSession.mockImplementation(async (cid: number | string) => {
     sessionMap.delete(String(cid));
+    messageIdsMap.delete(String(cid));
   });
+  mockAppendMessageId.mockImplementation(async (cid: number | string, messageId: number) => {
+    const key = String(cid);
+    const list = messageIdsMap.get(key) ?? [];
+    list.push(messageId);
+    messageIdsMap.set(key, list);
+  });
+  mockGetMessageIds.mockImplementation(
+    async (cid: number | string) => messageIdsMap.get(String(cid)) ?? [],
+  );
   mockSendMessage.mockImplementation(() => Promise.resolve({ message_id: ++_mockMsgId }));
   mockDeleteMessage.mockResolvedValue(true);
   (mockPrisma.$transaction as jest.Mock).mockImplementation(makeTxMock(mockPrisma));
@@ -122,9 +147,10 @@ describe('/start <code> handling', () => {
         step: 'awaiting_confirmation',
         agentId: 'ag_test',
         pairingCode: 'ABCD1234',
-        messageIds: expect.arrayContaining([1]),
       }),
     );
+    // The /start message id is tracked separately for ephemeral cleanup.
+    expect(mockAppendMessageId).toHaveBeenCalledWith(chatId, 1);
     // Message should contain the agentId so the user knows what they are linking
     expect(mockSendMessage).toHaveBeenCalledWith(
       chatId,
@@ -400,10 +426,10 @@ describe('ephemeral setup-message cleanup', () => {
 
     await handleTelegramMessage(userMsg('/start ABCD1234', 7));
 
-    const stored = sessionMap.get(String(chatId));
-    expect(stored).toBeDefined();
-    expect(stored.messageIds).toEqual(expect.arrayContaining([7])); // user /start
-    expect(stored.messageIds.length).toBeGreaterThanOrEqual(2); // user + bot confirmation
+    expect(sessionMap.get(String(chatId))).toBeDefined();
+    const tracked = messageIdsMap.get(String(chatId)) ?? [];
+    expect(tracked).toEqual(expect.arrayContaining([7])); // user /start
+    expect(tracked.length).toBeGreaterThanOrEqual(2); // user + bot confirmation
   });
 
   it('on success, bulk-deletes every tracked setup message', async () => {
@@ -413,8 +439,8 @@ describe('ephemeral setup-message cleanup', () => {
       step: 'awaiting_email',
       agentId: 'ag_test',
       pairingCode: 'ABCD1234',
-      messageIds: [11, 12, 13],
     });
+    messageIdsMap.set(String(chatId), [11, 12, 13]);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
       code: 'ABCD1234',
       agentId: 'ag_test',
@@ -428,10 +454,11 @@ describe('ephemeral setup-message cleanup', () => {
 
     await handleTelegramMessage(userMsg('alice@example.com', 14));
 
-    // Should have deleted the original 3 ids + the user's email reply (14) + the success message
+    // Cleanup deletes the 3 prior tracked ids + the user's email reply (14).
+    // The API-key success message is intentionally NOT tracked so the user can copy it.
     const deletedIds = mockDeleteMessage.mock.calls.map((c) => c[1] as number);
     expect(deletedIds).toEqual(expect.arrayContaining([11, 12, 13, 14]));
-    expect(mockDeleteMessage.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(mockDeleteMessage.mock.calls.length).toBe(4);
   });
 
   it('emits TELEGRAM_SETUP_CLEANED audit event with deleted count after success', async () => {
@@ -439,8 +466,8 @@ describe('ephemeral setup-message cleanup', () => {
       step: 'awaiting_email',
       agentId: 'ag_test',
       pairingCode: 'ABCD1234',
-      messageIds: [21, 22],
     });
+    messageIdsMap.set(String(chatId), [21, 22]);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
       code: 'ABCD1234',
       agentId: 'ag_test',
@@ -468,8 +495,8 @@ describe('ephemeral setup-message cleanup', () => {
       step: 'awaiting_confirmation',
       agentId: 'ag_old',
       pairingCode: 'OLDCODE1',
-      messageIds: [31, 32],
     });
+    messageIdsMap.set(String(chatId), [31, 32]);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
       code: 'NEWCODE2',
       agentId: 'ag_new',
@@ -486,7 +513,8 @@ describe('ephemeral setup-message cleanup', () => {
     // Fresh session should NOT carry over old messageIds
     const stored = sessionMap.get(String(chatId));
     expect(stored.agentId).toBe('ag_new');
-    expect(stored.messageIds).not.toEqual(expect.arrayContaining([31, 32]));
+    const freshIds = messageIdsMap.get(String(chatId)) ?? [];
+    expect(freshIds).not.toEqual(expect.arrayContaining([31, 32]));
   });
 
   it('best-effort: a failing deleteMessage does not abort subsequent deletes', async () => {
@@ -494,8 +522,8 @@ describe('ephemeral setup-message cleanup', () => {
       step: 'awaiting_email',
       agentId: 'ag_test',
       pairingCode: 'ABCD1234',
-      messageIds: [41, 42, 43],
     });
+    messageIdsMap.set(String(chatId), [41, 42, 43]);
     (mockPrisma.pairingCode.findUnique as jest.Mock).mockResolvedValue({
       code: 'ABCD1234',
       agentId: 'ag_test',

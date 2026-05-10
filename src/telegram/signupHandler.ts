@@ -2,6 +2,7 @@ import type { Update } from 'grammy/types';
 import { InlineKeyboard } from 'grammy';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import { z } from 'zod';
 import { prisma } from '@/db/client';
 import { logger } from '@/config/logger';
 import { getTelegramBot } from './telegramClient';
@@ -9,22 +10,20 @@ import {
   getSignupSession,
   setSignupSession,
   clearSignupSession,
+  appendSignupMessageId,
+  getSignupMessageIds,
   getPrefSession,
   clearPrefSession,
-  type SignupSession,
 } from './sessionStore';
 import { sendMainMenu } from './menuHandler';
 import { CardCancelPolicy } from '@/contracts';
 
 const log = logger.child({ module: 'telegram/signupHandler' });
 
+const emailSchema = z.string().email().max(254);
+
 type SendMessageOpts = Parameters<ReturnType<typeof getTelegramBot>['api']['sendMessage']>[2];
 
-/**
- * Sends a message and records its message_id in the active signup session
- * so it can be deleted on completion. If no session exists, falls back to a
- * plain sendMessage (the message simply won't be tracked for cleanup).
- */
 async function sendEphemeral(
   chatId: number,
   text: string,
@@ -39,27 +38,15 @@ async function sendEphemeral(
   return msg.message_id;
 }
 
-async function appendSignupMessageId(chatId: number, messageId: number): Promise<void> {
-  const session = await getSignupSession(chatId);
-  if (!session) return;
-  await setSignupSession(chatId, {
-    ...session,
-    messageIds: [...(session.messageIds ?? []), messageId],
-  });
-}
-
 /**
- * Best-effort bulk delete of all setup messages tracked on a session.
+ * Best-effort bulk delete of all setup messages tracked for a chat.
  * Per-id failures are swallowed so a single error doesn't abort the rest.
  * Telegram only allows bots to delete messages within the last 48h; the 10-min
  * session TTL keeps us well inside that window.
  */
-async function cleanupSignupMessages(
-  chatId: number,
-  session: Pick<SignupSession, 'messageIds'> | null,
-): Promise<number> {
+async function cleanupSignupMessages(chatId: number): Promise<number> {
   const bot = getTelegramBot();
-  const ids = session?.messageIds ?? [];
+  const ids = await getSignupMessageIds(chatId);
   let deleted = 0;
   for (const id of ids) {
     try {
@@ -116,8 +103,8 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
     // If a stale signup session exists from a previous abandoned attempt,
     // clean up its tracked messages before starting fresh.
     const stale = await getSignupSession(chatId);
-    if (stale && (stale.messageIds?.length ?? 0) > 0) {
-      await cleanupSignupMessages(chatId, stale);
+    if (stale) {
+      await cleanupSignupMessages(chatId);
       await clearSignupSession(chatId);
     }
 
@@ -152,14 +139,13 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       return;
     }
 
-    // Initialize session with the user's /start message id already tracked,
-    // so the chat is fully cleaned up at the end.
     await setSignupSession(chatId, {
       step: 'awaiting_confirmation',
       agentId: pairingCode.agentId,
       pairingCode: code,
-      messageIds: [message.message_id],
     });
+    // Track the user's /start message so the chat is fully cleaned up at the end.
+    await appendSignupMessageId(chatId, message.message_id);
 
     const keyboard = new InlineKeyboard()
       .text('✅ Confirm', 'link_confirm:_')
@@ -191,7 +177,7 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
   // step === 'awaiting_email'
   const email = text.toLowerCase();
 
-  if (!isValidEmail(email)) {
+  if (!emailSchema.safeParse(email).success) {
     await sendEphemeral(chatId, "⚠️ That doesn't look like a valid email. Please try again.");
     return;
   }
@@ -240,18 +226,17 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       return { user, rawKey };
     });
 
-    // Send the success/API-key message as ephemeral so its id is tracked,
-    // then bulk-delete every signup message and land the user on the main menu.
-    await sendEphemeral(
+    // Bulk-delete every tracked setup message before showing the API key, so
+    // the API-key message survives cleanup and the user can copy the credential
+    // (it won't be shown again). Send it untracked.
+    const deleted = await cleanupSignupMessages(chatId);
+    await clearSignupSession(chatId);
+
+    await bot.api.sendMessage(
       chatId,
       `Account created! Your OpenClaw agent (<code>${session.agentId}</code>) is now linked.\n\nYour API key (save it — it won't be shown again):\n\n${result.rawKey}\n\nYou'll receive payment approval requests here.`,
       { parse_mode: 'HTML' },
     );
-
-    // Re-read the session so cleanup includes the success message id we just appended.
-    const finalSession = await getSignupSession(chatId);
-    await clearSignupSession(chatId);
-    const deleted = await cleanupSignupMessages(chatId, finalSession);
 
     await prisma.auditEvent
       .create({
@@ -268,6 +253,7 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
     await sendMainMenu(chatId);
   } catch (err: any) {
     if (err.name === 'PairingCodeAlreadyClaimedError') {
+      await cleanupSignupMessages(chatId);
       await clearSignupSession(chatId);
       await bot.api.sendMessage(
         chatId,
@@ -283,8 +269,4 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       throw err;
     }
   }
-}
-
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }

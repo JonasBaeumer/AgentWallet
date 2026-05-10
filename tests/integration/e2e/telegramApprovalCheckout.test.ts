@@ -81,13 +81,19 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
   });
 
   afterAll(async () => {
-    await prisma.virtualCard.deleteMany({ where: { intentId } });
-    await prisma.ledgerEntry.deleteMany({ where: { intentId } });
-    await prisma.pot.deleteMany({ where: { intentId } });
-    await prisma.approvalDecision.deleteMany({ where: { intentId } });
-    await prisma.auditEvent.deleteMany({ where: { intentId } });
-    await prisma.purchaseIntent.deleteMany({ where: { id: intentId } });
-    await prisma.user.deleteMany({ where: { id: userId } });
+    // Guard against `undefined` intentId/userId producing unfiltered deletes
+    // when a beforeAll fails before either is assigned.
+    if (intentId) {
+      await prisma.virtualCard.deleteMany({ where: { intentId } });
+      await prisma.ledgerEntry.deleteMany({ where: { intentId } });
+      await prisma.pot.deleteMany({ where: { intentId } });
+      await prisma.approvalDecision.deleteMany({ where: { intentId } });
+      await prisma.auditEvent.deleteMany({ where: { intentId } });
+      await prisma.purchaseIntent.deleteMany({ where: { id: intentId } });
+    }
+    if (userId) {
+      await prisma.user.deleteMany({ where: { id: userId } });
+    }
   });
 
   // -- Step 1 -- Create test user ---------------------------------------------
