@@ -32,7 +32,9 @@ export async function clearSignupSession(chatId: number | string): Promise<void>
 }
 
 // Atomic append via RPUSH so concurrent webhook handlers for the same chat
-// cannot race and clobber each other's tracked message ids.
+// cannot race and clobber each other's tracked message ids. RPUSH and EXPIRE
+// are pipelined so a network blip between the two cannot leave an orphaned
+// list with no TTL.
 export async function appendSignupMessageId(
   chatId: number | string,
   messageId: number,
@@ -40,8 +42,7 @@ export async function appendSignupMessageId(
 ): Promise<void> {
   const redis = getRedisClient();
   const key = `${MSGS_KEY_PREFIX}${chatId}`;
-  await redis.rpush(key, String(messageId));
-  await redis.expire(key, ttlSeconds);
+  await redis.pipeline().rpush(key, String(messageId)).expire(key, ttlSeconds).exec();
 }
 
 export async function getSignupMessageIds(chatId: number | string): Promise<number[]> {
