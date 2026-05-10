@@ -42,9 +42,7 @@ const stripeCtx = createStripeProvider();
 const hasStripeKey = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_');
 const isMockMode = process.env.TELEGRAM_MOCK === 'true' || !process.env.TELEGRAM_BOT_TOKEN;
 const hasTelegram =
-  isMockMode ||
-  (!!process.env.TELEGRAM_BOT_TOKEN &&
-    !!(process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID));
+  isMockMode || (!!process.env.TELEGRAM_BOT_TOKEN && !!process.env.TELEGRAM_TEST_CHAT_ID);
 
 const testSuite = hasStripeKey && hasTelegram ? describe : describe.skip;
 
@@ -62,10 +60,8 @@ const CURRENCY = 'eur';
 const APPROVAL_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 2_000;
 
-// Use a synthetic chat ID in mock mode; prefer the dedicated test channel over the main chat
-const TEST_CHAT_ID = isMockMode
-  ? '999999999'
-  : (process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID)!;
+// Use a synthetic chat ID in mock mode; otherwise the chat to send the test message to
+const TEST_CHAT_ID = isMockMode ? '999999999' : process.env.TELEGRAM_TEST_CHAT_ID!;
 
 // -- Teardown -----------------------------------------------------------------
 afterAll(async () => {
@@ -85,13 +81,19 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
   });
 
   afterAll(async () => {
-    await prisma.virtualCard.deleteMany({ where: { intentId } });
-    await prisma.ledgerEntry.deleteMany({ where: { intentId } });
-    await prisma.pot.deleteMany({ where: { intentId } });
-    await prisma.approvalDecision.deleteMany({ where: { intentId } });
-    await prisma.auditEvent.deleteMany({ where: { intentId } });
-    await prisma.purchaseIntent.deleteMany({ where: { id: intentId } });
-    await prisma.user.deleteMany({ where: { id: userId } });
+    // Guard against `undefined` intentId/userId producing unfiltered deletes
+    // when a beforeAll fails before either is assigned.
+    if (intentId) {
+      await prisma.virtualCard.deleteMany({ where: { intentId } });
+      await prisma.ledgerEntry.deleteMany({ where: { intentId } });
+      await prisma.pot.deleteMany({ where: { intentId } });
+      await prisma.approvalDecision.deleteMany({ where: { intentId } });
+      await prisma.auditEvent.deleteMany({ where: { intentId } });
+      await prisma.purchaseIntent.deleteMany({ where: { id: intentId } });
+    }
+    if (userId) {
+      await prisma.user.deleteMany({ where: { id: userId } });
+    }
   });
 
   // -- Step 1 -- Create test user ---------------------------------------------

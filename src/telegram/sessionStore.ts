@@ -1,6 +1,7 @@
 import { getRedisClient } from '@/config/redis';
 
 const KEY_PREFIX = 'telegram_signup:';
+const MSGS_KEY_PREFIX = 'telegram_signup_msgs:';
 const DEFAULT_TTL_SECONDS = 600; // 10 minutes
 
 export interface SignupSession {
@@ -27,7 +28,26 @@ export async function setSignupSession(
 
 export async function clearSignupSession(chatId: number | string): Promise<void> {
   const redis = getRedisClient();
-  await redis.del(`${KEY_PREFIX}${chatId}`);
+  await redis.del(`${KEY_PREFIX}${chatId}`, `${MSGS_KEY_PREFIX}${chatId}`);
+}
+
+// Atomic append via RPUSH so concurrent webhook handlers for the same chat
+// cannot race and clobber each other's tracked message ids.
+export async function appendSignupMessageId(
+  chatId: number | string,
+  messageId: number,
+  ttlSeconds = DEFAULT_TTL_SECONDS,
+): Promise<void> {
+  const redis = getRedisClient();
+  const key = `${MSGS_KEY_PREFIX}${chatId}`;
+  await redis.rpush(key, String(messageId));
+  await redis.expire(key, ttlSeconds);
+}
+
+export async function getSignupMessageIds(chatId: number | string): Promise<number[]> {
+  const redis = getRedisClient();
+  const ids = await redis.lrange(`${MSGS_KEY_PREFIX}${chatId}`, 0, -1);
+  return ids.map((id) => Number(id));
 }
 
 // ── Preferences session (custom TTL input) ────────────────────────────────────

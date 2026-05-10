@@ -2,17 +2,62 @@ import type { Update } from 'grammy/types';
 import { InlineKeyboard } from 'grammy';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import { z } from 'zod';
 import { prisma } from '@/db/client';
+import { logger } from '@/config/logger';
 import { getTelegramBot } from './telegramClient';
 import {
   getSignupSession,
   setSignupSession,
   clearSignupSession,
+  appendSignupMessageId,
+  getSignupMessageIds,
   getPrefSession,
   clearPrefSession,
 } from './sessionStore';
 import { sendMainMenu } from './menuHandler';
 import { CardCancelPolicy } from '@/contracts';
+
+const log = logger.child({ module: 'telegram/signupHandler' });
+
+const emailSchema = z.string().email().max(254);
+
+type SendMessageOpts = Parameters<ReturnType<typeof getTelegramBot>['api']['sendMessage']>[2];
+
+async function sendEphemeral(
+  chatId: number,
+  text: string,
+  opts?: SendMessageOpts,
+): Promise<number> {
+  const bot = getTelegramBot();
+  const msg =
+    opts === undefined
+      ? await bot.api.sendMessage(chatId, text)
+      : await bot.api.sendMessage(chatId, text, opts);
+  await appendSignupMessageId(chatId, msg.message_id);
+  return msg.message_id;
+}
+
+/**
+ * Best-effort bulk delete of all setup messages tracked for a chat.
+ * Per-id failures are swallowed so a single error doesn't abort the rest.
+ * Telegram only allows bots to delete messages within the last 48h; the 10-min
+ * session TTL keeps us well inside that window.
+ */
+async function cleanupSignupMessages(chatId: number): Promise<number> {
+  const bot = getTelegramBot();
+  const ids = await getSignupMessageIds(chatId);
+  let deleted = 0;
+  for (const id of ids) {
+    try {
+      await bot.api.deleteMessage(chatId, id);
+      deleted++;
+    } catch {
+      // ignored — already deleted, expired, or older than 48h
+    }
+  }
+  return deleted;
+}
 
 export async function handleTelegramMessage(update: Update): Promise<void> {
   const message = update.message;
@@ -55,6 +100,14 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
 
   // Handle /start <code> command
   if (text.startsWith('/start')) {
+    // If a stale signup session exists from a previous abandoned attempt,
+    // clean up its tracked messages before starting fresh.
+    const stale = await getSignupSession(chatId);
+    if (stale) {
+      await cleanupSignupMessages(chatId);
+      await clearSignupSession(chatId);
+    }
+
     const parts = text.split(/\s+/);
     const code = parts[1]?.toUpperCase();
 
@@ -91,12 +144,14 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       agentId: pairingCode.agentId,
       pairingCode: code,
     });
+    // Track the user's /start message so the chat is fully cleaned up at the end.
+    await appendSignupMessageId(chatId, message.message_id);
 
     const keyboard = new InlineKeyboard()
       .text('✅ Confirm', 'link_confirm:_')
       .text('❌ Cancel', 'link_cancel:_');
 
-    await bot.api.sendMessage(
+    await sendEphemeral(
       chatId,
       `🤖 Agent <code>${pairingCode.agentId}</code> wants to link to your account.\n\nDo you want to proceed?`,
       { parse_mode: 'HTML', reply_markup: keyboard },
@@ -111,19 +166,19 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
     return;
   }
 
+  // Track the user's incoming message for later cleanup, regardless of branch.
+  await appendSignupMessageId(chatId, message.message_id);
+
   if (session.step === 'awaiting_confirmation') {
-    await bot.api.sendMessage(
-      chatId,
-      'Please use the buttons above to confirm or cancel the linking.',
-    );
+    await sendEphemeral(chatId, 'Please use the buttons above to confirm or cancel the linking.');
     return;
   }
 
   // step === 'awaiting_email'
   const email = text.toLowerCase();
 
-  if (!isValidEmail(email)) {
-    await bot.api.sendMessage(chatId, "⚠️ That doesn't look like a valid email. Please try again.");
+  if (!emailSchema.safeParse(email).success) {
+    await sendEphemeral(chatId, "⚠️ That doesn't look like a valid email. Please try again.");
     return;
   }
 
@@ -171,6 +226,10 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       return { user, rawKey };
     });
 
+    // Bulk-delete every tracked setup message before showing the API key, so
+    // the API-key message survives cleanup and the user can copy the credential
+    // (it won't be shown again). Send it untracked.
+    const deleted = await cleanupSignupMessages(chatId);
     await clearSignupSession(chatId);
 
     await bot.api.sendMessage(
@@ -178,8 +237,23 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       `Account created! Your OpenClaw agent (<code>${session.agentId}</code>) is now linked.\n\nYour API key (save it — it won't be shown again):\n\n${result.rawKey}\n\nYou'll receive payment approval requests here.`,
       { parse_mode: 'HTML' },
     );
+
+    await prisma.auditEvent
+      .create({
+        data: {
+          intentId: null,
+          actor: result.user.id,
+          agentId: session.agentId,
+          event: 'TELEGRAM_SETUP_CLEANED',
+          payload: { messageCount: deleted },
+        },
+      })
+      .catch((err) => log.error({ err }, 'Failed to record TELEGRAM_SETUP_CLEANED audit event'));
+
+    await sendMainMenu(chatId);
   } catch (err: any) {
     if (err.name === 'PairingCodeAlreadyClaimedError') {
+      await cleanupSignupMessages(chatId);
       await clearSignupSession(chatId);
       await bot.api.sendMessage(
         chatId,
@@ -187,7 +261,7 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       );
     } else if (err.code === 'P2002') {
       // Unique constraint — email already taken
-      await bot.api.sendMessage(
+      await sendEphemeral(
         chatId,
         '⚠️ An account with that email already exists. Please use a different email.',
       );
@@ -195,8 +269,4 @@ export async function handleTelegramMessage(update: Update): Promise<void> {
       throw err;
     }
   }
-}
-
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
