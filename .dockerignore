@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+yarn.lock
+pnpm-lock.yaml
+
+.git
+.github
+
+dist
+coverage
+
+.env
+.env.*
+
+*.md
+*.pdf
+.DS_Store

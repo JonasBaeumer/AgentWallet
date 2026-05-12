@@ -258,7 +258,7 @@ Every purchase is a `PurchaseIntent` tracked through an explicit state machine. 
 ### Prerequisites
 
 - **Node.js** 18+
-- **Docker** (for Postgres + Redis)
+- **Docker** (for Postgres + Redis, or to run the full stack)
 - **Stripe account** with Issuing enabled — see [docs/stripe-setup.md](docs/stripe-setup.md) for the full walkthrough
 - **Telegram bot token** (optional) — for approval notifications and user signup; see [docs/telegram-setup.md](docs/telegram-setup.md)
 
@@ -284,6 +284,20 @@ Everything else has safe defaults for local development.
 
 ```bash
 docker compose up -d    # starts Postgres 16 + Redis 7
+```
+
+### Alternative: run the full stack with Docker
+
+If you want a single-command local start (app + Postgres + Redis):
+
+```bash
+docker compose -f docker-compose.full.yml up --build
+```
+
+This starts the API on `http://localhost:3000` (override with `APP_PORT=3001` if `3000` is taken). You'll still need to run DB migrations at least once (inside the app container so `DATABASE_URL` points at the `postgres` service):
+
+```bash
+docker compose -f docker-compose.full.yml exec app npx prisma migrate deploy
 ```
 
 ### 3. Migrate and seed
