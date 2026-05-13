@@ -38,7 +38,6 @@ import { reconcileIntent } from '@/payments/providers/stripe/reconciliationServi
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockChildLogger.error.mockClear();
 });
 
 // ── Bug 1: negative Stripe capture amounts ────────────────────────────────────
