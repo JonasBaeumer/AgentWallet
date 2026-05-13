@@ -559,19 +559,19 @@ Copy `.env.example` to `.env` and fill in:
 npm test
 
 # Specific module
-npm test -- --testPathPattern=orchestrator
-npm test -- --testPathPattern=payments
-npm test -- --testPathPattern=api
-npm test -- --testPathPattern="policy|approval|ledger"
-npm test -- --testPathPattern=queue
-npm test -- --testPathPattern=telegram
+npm test -- --testPathPatterns=orchestrator
+npm test -- --testPathPatterns=payments
+npm test -- --testPathPatterns=api
+npm test -- --testPathPatterns="policy|approval|ledger"
+npm test -- --testPathPatterns=queue
+npm test -- --testPathPatterns=telegram
 
 # Integration tests (requires running Postgres + Redis + sk_test_* key)
 npm run test:integration
 
 # Single integration suite
-npm run test:integration -- --testPathPattern=checkoutSimulator
-npm run test:integration -- --testPathPattern=onboarding
+npm run test:integration -- --testPathPatterns=checkoutSimulator
+npm run test:integration -- --testPathPatterns=onboarding
 ```
 
 Integration tests are skipped automatically when `STRIPE_SECRET_KEY` is not a `sk_test_*` key, so they are safe to run in CI with the appropriate secret.
