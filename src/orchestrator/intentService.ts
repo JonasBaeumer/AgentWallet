@@ -1,14 +1,13 @@
 import { prisma } from '@/db/client';
 import { IntentEvent, PurchaseIntentData, AuditEventData, IntentNotFoundError } from '@/contracts';
 import { logger } from '@/config/logger';
-
-const log = logger.child({ module: 'orchestrator/intentService' });
 import { transitionIntent, TransitionResult } from './stateMachine';
 import { getPaymentProvider, getProviderForIntent } from '@/payments';
 import { returnIntent } from '@/ledger/potService';
 import { enqueueCancelCard } from '@/queue/producers';
-import { getTelegramBot } from '@/telegram/telegramClient';
-import { InlineKeyboard } from 'grammy';
+import { sendManualCardPendingNotice } from '@/telegram/notificationService';
+
+const log = logger.child({ module: 'orchestrator/intentService' });
 
 export async function getIntentWithHistory(intentId: string): Promise<{
   intent: PurchaseIntentData;
@@ -128,43 +127,28 @@ async function applyPostCheckoutCancelPolicy(intentId: string): Promise<void> {
     await provider.cancelCard(intentId).catch((err) => {
       log.error({ intentId, err }, 'IMMEDIATE card cancel failed');
     });
-  } else if (cancelPolicy === 'AFTER_TTL' && cardTtlMinutes != null) {
-    // cardTtlMinutes <= 0 means cancel immediately rather than enqueueing a
-    // 0-delay job (avoids a queue round-trip and a job that races the
-    // checkout response). Truthy check would treat 0 as "unset" and silently
-    // leave the card live.
-    if (cardTtlMinutes <= 0) {
-      await provider.cancelCard(intentId).catch((err) => {
-        log.error({ intentId, err }, 'AFTER_TTL immediate card cancel failed');
-      });
-    } else {
+  } else if (cancelPolicy === 'AFTER_TTL') {
+    if (cardTtlMinutes != null && cardTtlMinutes > 0) {
       await enqueueCancelCard(intentId, cardTtlMinutes * 60 * 1000);
+    } else {
+      // Invariant violation: AFTER_TTL requires a positive cardTtlMinutes.
+      // Rather than silently leave the card active, fail loud and fall back
+      // to IMMEDIATE cancellation so no card outlives checkout.
+      log.error(
+        { intentId, cancelPolicy, cardTtlMinutes },
+        'AFTER_TTL policy with missing/invalid cardTtlMinutes — falling back to IMMEDIATE cancel',
+      );
+      await provider.cancelCard(intentId).catch((err) => {
+        log.error({ intentId, err }, 'AFTER_TTL fallback IMMEDIATE cancel failed');
+      });
     }
   } else if (cancelPolicy === 'MANUAL') {
     await provider.freezeCard(intentId).catch((err) => {
       log.error({ intentId, err }, 'MANUAL card freeze failed');
     });
     if (telegramChatId) {
-      await notifyManualCardPending(telegramChatId, intentId, intent.subject ?? intent.query);
+      await sendManualCardPendingNotice(telegramChatId, intentId, intent.subject ?? intent.query);
     }
-  }
-}
-
-async function notifyManualCardPending(
-  telegramChatId: string,
-  intentId: string,
-  label: string,
-): Promise<void> {
-  try {
-    const bot = getTelegramBot();
-    const keyboard = new InlineKeyboard().text('Cancel Card Now', `menu_card_cancel:${intentId}`);
-    await bot.api.sendMessage(
-      Number(telegramChatId),
-      `Checkout complete for "${label}".\n\nYour virtual card is frozen. Tap below when you no longer need it.`,
-      { reply_markup: keyboard },
-    );
-  } catch (err) {
-    log.error({ intentId, err }, 'Failed to send MANUAL card notification');
   }
 }
 
