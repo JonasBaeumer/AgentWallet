@@ -84,6 +84,10 @@ describeIfStripe('Reconciliation integration', () => {
       },
     });
 
+    // Simulate a captured transaction. We use createForceCapture (rather than
+    // create+capture on an authorization) because the latter requires the
+    // authorization to first be approved and pending — which in turn needs a
+    // running webhook approver. Force-capture lets the test stay self-contained.
     await stripe.testHelpers.issuing.transactions.createForceCapture({
       card: cardId,
       amount: 3500,
@@ -111,12 +115,28 @@ describeIfStripe('Reconciliation integration', () => {
   }, 60_000);
 
   afterAll(async () => {
-    await prisma.ledgerEntry.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.pot.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.virtualCard.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.purchaseIntent.deleteMany({ where: { id: intentId } }).catch(() => {});
-    await prisma.user.deleteMany({ where: { id: userId } }).catch(() => {});
-    await prisma.$disconnect();
+    // Clean up DB records in FK dependency order. The schema doesn't define
+    // ON DELETE CASCADE, so each child table must be cleared explicitly.
+    try {
+      // Safety: if beforeAll fails before assigning IDs, never run a deleteMany
+      // with an undefined filter (Prisma can interpret it as no filter).
+      if (intentId) {
+        await prisma.ledgerEntry.deleteMany({ where: { intentId } });
+        await prisma.pot.deleteMany({ where: { intentId } });
+        await prisma.virtualCard.deleteMany({ where: { intentId } });
+        await prisma.purchaseIntent.deleteMany({ where: { id: intentId } });
+      }
+
+      if (userId) {
+        await prisma.user.deleteMany({ where: { id: userId } });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Reconciliation integration cleanup failed', { intentId, userId, err });
+      throw err;
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   it('returns inSync:true when ledger matches Stripe captured amount', async () => {

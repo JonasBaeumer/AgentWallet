@@ -1,3 +1,5 @@
+// Mock stripe before imports — autoPagingToArray is the SDK helper used by
+// the service to page through transactions.
 const mockAutoPagingToArray = jest.fn();
 const mockTransactionsList = jest.fn(() => ({ autoPagingToArray: mockAutoPagingToArray }));
 const mockStripe = {
@@ -21,6 +23,7 @@ jest.mock('@/db/client', () => ({
   },
 }));
 
+// Mock logger so we can assert error logging on Stripe failures
 const mockChildLogger = {
   error: jest.fn(),
   warn: jest.fn(),
@@ -35,11 +38,13 @@ import { reconcileIntent } from '@/payments/providers/stripe/reconciliationServi
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockChildLogger.error.mockClear();
 });
 
-describe('reconcileIntent — capture amount sign handling (issue #88)', () => {
+// ── Bug 1: negative Stripe capture amounts ────────────────────────────────────
+
+describe('reconcileIntent — capture amount sign handling (issue #88 bug 1)', () => {
   it('treats Stripe-style negative capture amounts as positive captured totals', async () => {
+    // Real Stripe Issuing returns captures as negative integers.
     mockPot.mockResolvedValue({ reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' });
     mockLedgerEntries.mockResolvedValue([{ type: 'SETTLE', amount: 3500 }]);
     mockVirtualCard.mockResolvedValue({ intentId: 'intent-1', providerCardId: 'ic_neg' });
@@ -53,7 +58,7 @@ describe('reconcileIntent — capture amount sign handling (issue #88)', () => {
     expect(report.discrepancies).toHaveLength(0);
   });
 
-  it('flags a real settlement mismatch', async () => {
+  it('flags a real settlement mismatch (independent of the sign bug)', async () => {
     mockPot.mockResolvedValue({ reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' });
     mockLedgerEntries.mockResolvedValue([]);
     mockVirtualCard.mockResolvedValue({ intentId: 'intent-2', providerCardId: 'ic_mis' });
@@ -67,8 +72,11 @@ describe('reconcileIntent — capture amount sign handling (issue #88)', () => {
   });
 });
 
-describe('reconcileIntent — refunds (issue #88)', () => {
+// ── Bug 3: refunds must reduce the net captured ──────────────────────────────
+
+describe('reconcileIntent — refunds (issue #88 bug 3)', () => {
   it('subtracts refund transactions from the net captured total', async () => {
+    // €40 captured, €10 refunded → net €30 — matches a settledAmount of 3000.
     mockPot.mockResolvedValue({ reservedAmount: 5000, settledAmount: 3000, status: 'SETTLED' });
     mockLedgerEntries.mockResolvedValue([{ type: 'SETTLE', amount: 3000 }]);
     mockVirtualCard.mockResolvedValue({ intentId: 'intent-3', providerCardId: 'ic_refund' });
@@ -85,7 +93,9 @@ describe('reconcileIntent — refunds (issue #88)', () => {
   });
 });
 
-describe('reconcileIntent — Stripe API error handling (issue #88)', () => {
+// ── Bug 4: Stripe API errors must surface as discrepancies, not throws ───────
+
+describe('reconcileIntent — Stripe API error handling (issue #88 bug 4)', () => {
   it('returns a discrepancy report instead of throwing when cards.retrieve fails', async () => {
     mockPot.mockResolvedValue({ reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' });
     mockLedgerEntries.mockResolvedValue([]);
@@ -97,7 +107,11 @@ describe('reconcileIntent — Stripe API error handling (issue #88)', () => {
     expect(report.inSync).toBe(false);
     expect(report.stripe).toBeNull();
     expect(report.discrepancies[0]).toContain('stripe API error');
-    expect(mockChildLogger.error).toHaveBeenCalled();
+    expect(report.discrepancies[0]).toContain('No such card');
+    expect(mockChildLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ intentId: 'intent-err', providerCardId: 'ic_404' }),
+      expect.stringContaining('Stripe API call failed'),
+    );
   });
 
   it('returns a discrepancy report when transactions.list paging fails', async () => {
@@ -115,8 +129,11 @@ describe('reconcileIntent — Stripe API error handling (issue #88)', () => {
   });
 });
 
-describe('reconcileIntent — pagination (issue #88)', () => {
-  it('uses autoPagingToArray with a safety cap', async () => {
+// ── Bug 5: pagination ────────────────────────────────────────────────────────
+
+describe('reconcileIntent — pagination (issue #88 bug 5)', () => {
+  it('uses autoPagingToArray with a safety cap so paged transactions are summed', async () => {
+    // 250 captures of -10 → totalCaptured 2500.
     const txs = Array.from({ length: 250 }, (_, i) => ({
       id: `itxn_${i}`,
       amount: -10,
@@ -135,7 +152,7 @@ describe('reconcileIntent — pagination (issue #88)', () => {
     expect(report.inSync).toBe(true);
   });
 
-  it('flags a discrepancy when the safety cap is hit', async () => {
+  it('flags a discrepancy when the safety cap is hit (totalCaptured is incomplete)', async () => {
     const txs = Array.from({ length: 1000 }, (_, i) => ({
       id: `itxn_${i}`,
       amount: -1,
@@ -154,8 +171,10 @@ describe('reconcileIntent — pagination (issue #88)', () => {
   });
 });
 
-describe('reconcileIntent — missing virtualCard (issue #88)', () => {
-  it('returns inSync:true when neither pot nor card exists', async () => {
+// ── Bug 2: missing virtualCard with money already moved ───────────────────────
+
+describe('reconcileIntent — missing virtualCard (issue #88 bug 2)', () => {
+  it('returns inSync:true when neither pot nor card exists (truly empty intent)', async () => {
     mockPot.mockResolvedValue(null);
     mockLedgerEntries.mockResolvedValue([]);
     mockVirtualCard.mockResolvedValue(null);
@@ -167,7 +186,9 @@ describe('reconcileIntent — missing virtualCard (issue #88)', () => {
     expect(mockStripe.issuing.cards.retrieve).not.toHaveBeenCalled();
   });
 
-  it('returns inSync:true when pot is ACTIVE with no settled funds (in-flight)', async () => {
+  it('returns inSync:true when a pot exists but is still ACTIVE with no settled funds (in-flight)', async () => {
+    // Normal lifecycle: reserveForIntent creates the pot before issueCard
+    // creates the virtualCard. Between those two, this is the expected state.
     mockPot.mockResolvedValue({ reservedAmount: 5000, settledAmount: 0, status: 'ACTIVE' });
     mockLedgerEntries.mockResolvedValue([{ type: 'RESERVE', amount: 5000 }]);
     mockVirtualCard.mockResolvedValue(null);
@@ -189,8 +210,25 @@ describe('reconcileIntent — missing virtualCard (issue #88)', () => {
     expect(
       report.discrepancies.some((d) => d.includes('virtualCard missing') && d.includes('SETTLED')),
     ).toBe(true);
+    expect(mockStripe.issuing.cards.retrieve).not.toHaveBeenCalled();
+  });
+
+  it('returns inSync:false when pot is RETURNED but no virtualCard record exists', async () => {
+    mockPot.mockResolvedValue({ reservedAmount: 5000, settledAmount: 0, status: 'RETURNED' });
+    mockLedgerEntries.mockResolvedValue([
+      { type: 'RESERVE', amount: 5000 },
+      { type: 'RETURN', amount: 5000 },
+    ]);
+    mockVirtualCard.mockResolvedValue(null);
+
+    const report = await reconcileIntent('intent-orphaned-returned');
+
+    expect(report.inSync).toBe(false);
+    expect(report.discrepancies.some((d) => d.includes('RETURNED'))).toBe(true);
   });
 });
+
+// ── Card-status discrepancy (pre-existing behaviour, kept) ───────────────────
 
 describe('reconcileIntent — card status', () => {
   it('reports a discrepancy when pot is SETTLED but Stripe card is still active', async () => {
@@ -208,6 +246,8 @@ describe('reconcileIntent — card status', () => {
     ).toBe(true);
   });
 });
+
+// ── Internal report fields (pre-existing behaviour, kept) ─────────────────────
 
 describe('reconcileIntent — internal report fields', () => {
   it('reports zero balances and null potStatus when no pot exists', async () => {

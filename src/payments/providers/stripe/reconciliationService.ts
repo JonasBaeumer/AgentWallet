@@ -1,3 +1,4 @@
+import Stripe from 'stripe';
 import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
 import { logger } from '@/config/logger';
@@ -5,7 +6,10 @@ import type { ReconciliationReport } from '@/contracts';
 
 const log = logger.child({ module: 'payments/stripe/reconciliationService' });
 
-// Safety cap for stripe.issuing.transactions.list pagination.
+// Safety cap for stripe.issuing.transactions.list pagination. A single intent
+// shouldn't generate anywhere near this many transactions; the cap prevents
+// unbounded memory use if a metadata mistake points many transactions at the
+// same card.
 const MAX_TRANSACTIONS = 1000;
 
 export async function reconcileIntent(intentId: string): Promise<ReconciliationReport> {
@@ -20,6 +24,9 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
     ledgerEntries: entries.map((e) => `${e.type}:${e.amount}`),
   };
 
+  // No DB virtual card. The previous behaviour was to return inSync:true
+  // unconditionally — that's a false clean signal whenever the pot shows that
+  // money already moved (settled/returned) without a card record on file.
   if (!card) {
     const discrepancies: string[] = [];
     const moneyMoved =
@@ -41,8 +48,11 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
 
   const stripe = getStripeClient();
 
-  let stripeCard;
-  let transactions;
+  // Wrap the Stripe calls so a 404/429/network blip surfaces as a structured
+  // discrepancy instead of an unhandled exception. The webhook caller's outer
+  // catch already swallows throws silently — we want the audit trail.
+  let stripeCard: Stripe.Issuing.Card;
+  let transactions: Stripe.Issuing.Transaction[];
   try {
     stripeCard = await stripe.issuing.cards.retrieve(card.providerCardId);
     transactions = await stripe.issuing.transactions
@@ -63,7 +73,13 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
     };
   }
 
-  // Net captured: Stripe Issuing captures are negative; refunds are positive.
+  // Net captured = sum of capture-side amounts minus refunds.
+  // Stripe Issuing returns capture amounts as NEGATIVE integers (the
+  // cardholder's balance decreases) and refund/return amounts as POSITIVE.
+  // The previous code summed `t.amount` directly, which produced a negative
+  // total that never matched the positive `settledAmount` — every reconcile
+  // run reported a discrepancy. Using Math.abs and sign-correcting by type
+  // gives the comparable positive net.
   let totalCaptured = 0;
   for (const t of transactions) {
     const abs = Math.abs(t.amount);
@@ -91,6 +107,7 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
   if (pot !== null && pot.settledAmount !== totalCaptured) {
     discrepancies.push(`settledAmount ${pot.settledAmount} != stripe captured ${totalCaptured}`);
   }
+
   const expectedCardStatus =
     pot?.status === 'SETTLED' || pot?.status === 'RETURNED' ? 'canceled' : 'active';
   if (stripeCard.status !== expectedCardStatus) {
