@@ -41,9 +41,9 @@ import type { FastifyInstance } from 'fastify';
 // ── Environment ───────────────────────────────────────────────────────────────
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-// Prefer the dedicated test channel to keep the main bot chat uncluttered
-const _testChatIdRaw = process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID;
-const TEST_CHAT_ID = _testChatIdRaw ? parseInt(_testChatIdRaw, 10) : null;
+const TEST_CHAT_ID = process.env.TELEGRAM_TEST_CHAT_ID
+  ? parseInt(process.env.TELEGRAM_TEST_CHAT_ID, 10)
+  : null;
 const TELEGRAM_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? 'ilovedatadogok';
 const BASE = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const isMockEnv = process.env.TELEGRAM_MOCK === 'true';
@@ -86,7 +86,15 @@ let originalWebhookUrl = '';
 async function disableWebhook() {
   const info = await tgGet('getWebhookInfo');
   originalWebhookUrl = info.result?.url ?? '';
-  await tgPost('deleteWebhook', { drop_pending_updates: false });
+  const delResult = await tgPost('deleteWebhook', { drop_pending_updates: false });
+  if (!delResult.ok) {
+    throw new Error(`deleteWebhook failed: ${delResult.description}`);
+  }
+  // Verify webhook is actually gone — getUpdates must work
+  const verify = await tgGet('getWebhookInfo');
+  if (verify.result?.url) {
+    throw new Error(`Webhook still active after deletion: ${verify.result.url}`);
+  }
 }
 
 async function restoreWebhook() {
@@ -118,7 +126,7 @@ async function waitForCallback(
     const result = await tgGet('getUpdates', {
       offset: updateOffset,
       timeout: pollSecs,
-      allowed_updates: 'callback_query',
+      allowed_updates: JSON.stringify(['callback_query']),
     });
 
     if (!result.ok) {
@@ -134,7 +142,9 @@ async function waitForCallback(
     for (const update of result.result ?? []) {
       updateOffset = update.update_id + 1;
       const cb = update.callback_query;
-      if (!cb || cb.from.id !== TEST_CHAT_ID) continue;
+      // Filter by chat.id (not from.id) — in a group chat, from.id is the
+      // tapping user's personal ID, while chat.id is the group ID we expect.
+      if (!cb || cb.message?.chat?.id !== TEST_CHAT_ID) continue;
 
       const colonIdx = (cb.data ?? '').indexOf(':');
       const action = cb.data.slice(0, colonIdx);
@@ -143,6 +153,9 @@ async function waitForCallback(
       const matches = allowed.some((a) => (a.includes(':') ? cb.data === a : action === a));
 
       if (matches) {
+        // Answer immediately to dismiss the loading spinner — don't rely on the
+        // fire-and-forget app handler which may be too slow or fail silently.
+        await tgPost('answerCallbackQuery', { callback_query_id: cb.id });
         return {
           action,
           payload,
@@ -151,10 +164,13 @@ async function waitForCallback(
         };
       }
 
-      // Wrong button — alert user and keep waiting
+      // Wrong button — alert user and keep waiting. The instruction message
+      // sent just before is the most recent message in the chat (i.e. shown
+      // BELOW the keyboard), so point there instead of leaking internal
+      // callback_data identifiers.
       await tgPost('answerCallbackQuery', {
         callback_query_id: cb.id,
-        text: `⚠️ Please tap: ${allowed.join(' or ')}`,
+        text: '⚠️ Please tap the button named in the instruction below 👇',
         show_alert: true,
       });
     }
@@ -196,7 +212,7 @@ async function waitForTextMessage(
       const msg = update.message;
       if (
         msg &&
-        msg.from?.id === TEST_CHAT_ID &&
+        msg.chat?.id === TEST_CHAT_ID &&
         typeof msg.text === 'string' &&
         !msg.text.startsWith('/')
       ) {

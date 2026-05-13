@@ -35,6 +35,8 @@ jest.mock('@/queue/producers', () => ({
   enqueueCancelCard: jest.fn().mockResolvedValue(undefined),
 }));
 
+jest.setTimeout(60_000);
+
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
 const hasStripeKey =
   !!STRIPE_KEY && STRIPE_KEY.startsWith('sk_test_') && !STRIPE_KEY.includes('placeholder');
@@ -119,7 +121,7 @@ testSuite('Card lifecycle integration', () => {
       } catch (err) {
         throw new Error(`Group 1 setup failed: ${err}`);
       }
-    }, 30_000);
+    }, 90_000);
 
     it('reserves funds and reduces user balance to €90', async () => {
       await reserveForIntent(userId, intentId, 1_000);
@@ -220,7 +222,7 @@ testSuite('Card lifecycle integration', () => {
       } catch (err) {
         throw new Error(`Group 2 setup failed: ${err}`);
       }
-    }, 30_000);
+    }, 90_000);
 
     it('reserves funds and reduces user balance to €90', async () => {
       await reserveForIntent(userId, intentId, 1_000);
@@ -314,7 +316,7 @@ testSuite('Card lifecycle integration', () => {
       } catch (err) {
         throw new Error(`Group 3 setup failed: ${err}`);
       }
-    }, 30_000);
+    }, 90_000);
 
     it('double cancelCard does not throw', async () => {
       await cancelCard(cancelIntentId);

@@ -17,6 +17,12 @@ jest.mock('@/db/client', () => ({
   },
 }));
 
+jest.mock('@/queue/producers', () => ({
+  enqueueSearch: jest.fn().mockResolvedValue(undefined),
+  enqueueCheckout: jest.fn().mockResolvedValue(undefined),
+  enqueueCancelCard: jest.fn().mockResolvedValue(undefined),
+}));
+
 const mockHandleWebhookEvent = jest.fn();
 jest.mock('@/payments', () => ({
   getPaymentProvider: () => ({ handleWebhookEvent: mockHandleWebhookEvent }),

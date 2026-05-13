@@ -17,8 +17,6 @@ export const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
   TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET || '',
-  TELEGRAM_TEST_CHAT_ID: process.env.TELEGRAM_TEST_CHAT_ID || '',
-  TELEGRAM_TEST_CHANNEL_ID: process.env.TELEGRAM_TEST_CHANNEL_ID || '',
   TELEGRAM_MOCK: process.env.TELEGRAM_MOCK === 'true',
   PAYMENT_PROVIDER: process.env.PAYMENT_PROVIDER || 'stripe',
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',

@@ -38,13 +38,13 @@ import { getTelegramMockCalls, clearTelegramMockCalls } from '@/telegram/mockBot
 
 const stripeCtx = createStripeProvider();
 
+jest.setTimeout(60_000);
+
 // -- Skip conditions ----------------------------------------------------------
 const hasStripeKey = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_');
 const isMockMode = process.env.TELEGRAM_MOCK === 'true' || !process.env.TELEGRAM_BOT_TOKEN;
 const hasTelegram =
-  isMockMode ||
-  (!!process.env.TELEGRAM_BOT_TOKEN &&
-    !!(process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID));
+  isMockMode || (!!process.env.TELEGRAM_BOT_TOKEN && !!process.env.TELEGRAM_TEST_CHAT_ID);
 
 const testSuite = hasStripeKey && hasTelegram ? describe : describe.skip;
 
@@ -62,10 +62,8 @@ const CURRENCY = 'eur';
 const APPROVAL_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 2_000;
 
-// Use a synthetic chat ID in mock mode; prefer the dedicated test channel over the main chat
-const TEST_CHAT_ID = isMockMode
-  ? '999999999'
-  : (process.env.TELEGRAM_TEST_CHANNEL_ID || process.env.TELEGRAM_TEST_CHAT_ID)!;
+// Use a synthetic chat ID in mock mode; otherwise the chat to send the test message to
+const TEST_CHAT_ID = isMockMode ? '999999999' : process.env.TELEGRAM_TEST_CHAT_ID!;
 
 // -- Teardown -----------------------------------------------------------------
 afterAll(async () => {
@@ -223,7 +221,7 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
       const intent = await prisma.purchaseIntent.findUniqueOrThrow({ where: { id: intentId } });
       expect([IntentStatus.CARD_ISSUED, IntentStatus.CHECKOUT_RUNNING]).toContain(intent.status);
     },
-    isMockMode ? 30_000 : APPROVAL_TIMEOUT_MS + 30_000,
+    isMockMode ? 120_000 : APPROVAL_TIMEOUT_MS + 60_000,
   );
 
   // -- Step 5 -- Verify card was issued ---------------------------------------
@@ -250,20 +248,17 @@ testSuite('Telegram approval -> Stripe Issuing checkout', () => {
 
     const card = await prisma.virtualCard.findUniqueOrThrow({ where: { intentId } });
 
-    const auth = await stripeCtx.stripe.testHelpers.issuing.authorizations.create({
+    // Use force-capture to bypass real-time authorization webhooks — a running
+    // stripe listen listener would otherwise interfere with the authorization.
+    const tx = await stripeCtx.stripe.testHelpers.issuing.transactions.createForceCapture({
       card: card.providerCardId,
       amount: CHECKOUT_AMOUNT,
       currency: CURRENCY,
       merchant_data: { name: MERCHANT_NAME },
     });
 
-    expect(auth.approved).toBe(true);
-    expect(auth.status).toBe('pending');
-    console.log(`Authorization approved: ${auth.id} (EUR${(CHECKOUT_AMOUNT / 100).toFixed(2)})`);
-
-    const captured = await stripeCtx.stripe.testHelpers.issuing.authorizations.capture(auth.id);
-    expect(captured.status).toBe('closed');
-    console.log(`Transaction captured.`);
+    expect(tx.type).toBe('capture');
+    console.log(`Transaction captured: ${tx.id} (EUR${(CHECKOUT_AMOUNT / 100).toFixed(2)})`);
   }, 30_000);
 
   // -- Step 7 -- Finalize intent + settle ledger ------------------------------

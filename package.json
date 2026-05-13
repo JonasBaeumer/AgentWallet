@@ -11,6 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset --force",
     "seed": "ts-node -r tsconfig-paths/register src/db/seed.ts",
+    "setup": "bash setup.sh",
     "lint": "eslint src tests --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""
@@ -30,6 +31,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@clack/prompts": "^0.11.0",
     "@eslint/js": "^9.39.4",
     "@types/bcryptjs": "^3.0.0",
     "@types/jest": "^29.5.12",

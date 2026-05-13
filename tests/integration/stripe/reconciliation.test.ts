@@ -9,10 +9,13 @@
  */
 
 import crypto from 'crypto';
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
 import { prisma } from '@/db/client';
 import { reconcileIntent } from '@/payments/providers/stripe/reconciliationService';
+import { getStripeClient } from '@/payments/providers/stripe/stripeClient';
 import { PaymentProvider } from '@/contracts';
+
+jest.setTimeout(60_000);
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
 const describeIfStripe =
@@ -25,7 +28,8 @@ let userId: string;
 
 describeIfStripe('Reconciliation integration', () => {
   beforeAll(async () => {
-    stripe = new Stripe(STRIPE_KEY!, { apiVersion: '2024-06-20' as Stripe.LatestApiVersion });
+    // Use the singleton so we inherit maxNetworkRetries: 3 (matches prod).
+    stripe = getStripeClient();
 
     const user = await prisma.user.create({
       data: {
@@ -84,6 +88,12 @@ describeIfStripe('Reconciliation integration', () => {
       },
     });
 
+    // Stripe test mode: freshly created individual cardholders need ~2-3s for
+    // their verification state to settle before authorizations are approved.
+    await new Promise((r) => setTimeout(r, 3000));
+
+    // Force-capture bypasses the real-time authorization webhook, so it works
+    // regardless of whether a stripe listen listener is running or not.
     await stripe.testHelpers.issuing.transactions.createForceCapture({
       card: cardId,
       amount: 3500,
@@ -94,13 +104,7 @@ describeIfStripe('Reconciliation integration', () => {
     await stripe.issuing.cards.update(cardId, { status: 'canceled' });
 
     await prisma.pot.create({
-      data: {
-        userId,
-        intentId,
-        reservedAmount: 5000,
-        settledAmount: 3500,
-        status: 'SETTLED',
-      },
+      data: { userId, intentId, reservedAmount: 5000, settledAmount: 3500, status: 'SETTLED' },
     });
     await prisma.ledgerEntry.create({
       data: { userId, intentId, type: 'RESERVE', amount: 5000 },
@@ -111,11 +115,12 @@ describeIfStripe('Reconciliation integration', () => {
   }, 60_000);
 
   afterAll(async () => {
+    // Delete in FK-dependency order: virtualCard/ledger/pot -> intent -> user
+    await prisma.virtualCard.deleteMany({ where: { intentId } }).catch(() => {});
     await prisma.ledgerEntry.deleteMany({ where: { intentId } }).catch(() => {});
     await prisma.pot.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.virtualCard.deleteMany({ where: { intentId } }).catch(() => {});
-    await prisma.purchaseIntent.deleteMany({ where: { id: intentId } }).catch(() => {});
-    await prisma.user.deleteMany({ where: { id: userId } }).catch(() => {});
+    await prisma.purchaseIntent.delete({ where: { id: intentId } }).catch(() => {});
+    await prisma.user.delete({ where: { id: userId } }).catch(() => {});
     await prisma.$disconnect();
   });
 

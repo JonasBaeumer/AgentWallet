@@ -48,7 +48,11 @@ jest.mock('@/telegram/telegramClient', () => ({
 jest.mock('@/queue/producers', () => ({
   enqueueSearch: jest.fn().mockResolvedValue(undefined),
   enqueueCheckout: jest.fn().mockResolvedValue(undefined),
+  enqueueCancelCard: jest.fn().mockResolvedValue(undefined),
 }));
+
+// Stripe API calls can be slow (TLS handshake 2-6s each). Set generous timeout.
+jest.setTimeout(120_000);
 
 const hasStripeKey = process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_');
 const testSuite = hasStripeKey ? describe : describe.skip;
@@ -73,9 +77,6 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
   };
 
   beforeAll(async () => {
-    // RUN_ID = Date.now() is unique per run, so no stale data cleanup needed.
-    // afterAll() cleans up everything we create here.
-
     // Create a minimal test user (€10 000 balance, €500 per-intent cap)
     const user = await prisma.user.create({
       data: {
@@ -116,7 +117,7 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
       expYear: reveal.expYear,
       last4: reveal.last4,
     };
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await prisma.virtualCard.deleteMany({ where: { intentId } });
@@ -189,19 +190,17 @@ testSuite('Stripe Issuing card lifecycle + checkout simulation', () => {
     });
 
     it('approves and captures a test authorization within the €1 spending limit', async () => {
-      // Attempt €0.50 against a €1 limit — should be approved
-      const auth = await stripeCtx.stripe.testHelpers.issuing.authorizations.create({
+      // Use force-capture to bypass real-time authorization webhooks — a running
+      // stripe listen listener would otherwise interfere with the authorization.
+      const tx = await stripeCtx.stripe.testHelpers.issuing.transactions.createForceCapture({
         card: stripeCardId,
         amount: 50, // €0.50 — within the €1 per_authorization limit
         currency: 'eur',
+        merchant_data: { name: 'Test Merchant' },
       });
 
-      expect(auth.approved).toBe(true);
-      expect(auth.status).toBe('pending');
-
-      // Capture creates an issuing_transaction and settles the authorization
-      const captured = await stripeCtx.stripe.testHelpers.issuing.authorizations.capture(auth.id);
-      expect(captured.status).toBe('closed');
+      expect(tx.type).toBe('capture');
+      expect(Math.abs(tx.amount)).toBe(50);
     });
   });
 

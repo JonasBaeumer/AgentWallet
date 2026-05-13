@@ -9,8 +9,6 @@ jest.mock('@/config/env', () => ({
     NODE_ENV: 'test',
     STRIPE_SECRET_KEY: 'sk_test_placeholder',
     STRIPE_WEBHOOK_SECRET: 'whsec_placeholder',
-    TELEGRAM_TEST_CHAT_ID: '',
-    TELEGRAM_TEST_CHANNEL_ID: '',
   },
 }));
 

@@ -17,7 +17,10 @@
  *   npm run test:integration -- --testPathPattern=authorizationFlow
  */
 
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
+import { getStripeClient } from '@/payments/providers/stripe/stripeClient';
+
+jest.setTimeout(60_000);
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
 
@@ -31,9 +34,8 @@ let cardId: string;
 
 describeIfStripe('Stripe testHelpers authorization flow', () => {
   beforeAll(async () => {
-    stripe = new Stripe(STRIPE_KEY!, {
-      apiVersion: '2024-06-20' as Stripe.LatestApiVersion,
-    });
+    // Use the singleton so we inherit maxNetworkRetries: 3 (matches prod).
+    stripe = getStripeClient();
 
     // Create a minimal cardholder + active virtual card for the test
     const cardholder = await stripe.issuing.cardholders.create({
