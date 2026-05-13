@@ -152,5 +152,20 @@ describe('User AFTER_TTL ↔ cardTtlMinutes CHECK constraint', () => {
       expect(updated.cancelPolicy).toBe(CardCancelPolicy.ON_TRANSACTION);
       expect(updated.cardTtlMinutes).toBeNull();
     });
+
+    it('allows switching to AFTER_TTL with a positive cardTtlMinutes in a single update', async () => {
+      const user = await createUser({
+        cancelPolicy: CardCancelPolicy.ON_TRANSACTION,
+        cardTtlMinutes: null,
+      });
+
+      const updated = await prisma.user.update({
+        where: { id: user.id },
+        data: { cancelPolicy: CardCancelPolicy.AFTER_TTL, cardTtlMinutes: 30 },
+      });
+
+      expect(updated.cancelPolicy).toBe(CardCancelPolicy.AFTER_TTL);
+      expect(updated.cardTtlMinutes).toBe(30);
+    });
   });
 });
