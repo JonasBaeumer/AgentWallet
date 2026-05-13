@@ -1,4 +1,3 @@
-import Stripe from 'stripe';
 import type { Event } from 'stripe/cjs/resources/Events';
 import type { Authorization, Transaction } from 'stripe/cjs/resources/Issuing';
 import { getStripeClient } from './stripeClient';
