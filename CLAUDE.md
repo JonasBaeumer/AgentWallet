@@ -37,7 +37,7 @@ npm run worker                  # run stub BullMQ worker (simulates OpenClaw loc
 # Tests
 npm test                               # all unit tests (no DB or Redis required)
 npm run test:integration               # integration tests (requires docker compose up -d first)
-npm test -- --testPathPattern=<module> # single module
+npm test -- --testPathPatterns=<module> # single module
 
 # Local infra (required before running the dev server or integration tests)
 docker compose up -d            # start Postgres + Redis
@@ -119,7 +119,7 @@ Every module must have:
 
 An agent must not commit until its own tests pass:
 ```bash
-npm test -- --testPathPattern=<module>
+npm test -- --testPathPatterns=<module>
 ```
 
 Cross-module E2E tests live in `tests/integration/e2e/` and are owned by the QA agent.

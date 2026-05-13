@@ -7,7 +7,7 @@
     "worker": "ts-node -r tsconfig-paths/register src/worker/stubWorker.ts",
     "build": "tsc",
     "test": "jest",
-    "test:integration": "TELEGRAM_MOCK=true jest --testPathPattern=integration --runInBand --forceExit",
+    "test:integration": "TELEGRAM_MOCK=true jest --testPathPatterns=integration --runInBand --forceExit",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset --force",
     "seed": "ts-node -r tsconfig-paths/register src/db/seed.ts",

@@ -42,7 +42,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm test -- --testPathPattern=tests/unit --coverage
+      - run: npm test -- --testPathPatterns=tests/unit --coverage
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://localhost:5432/dummy
