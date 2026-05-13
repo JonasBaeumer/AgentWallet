@@ -1,4 +1,5 @@
 import Stripe from 'stripe';
+import type { Balance } from 'stripe/cjs/resources/Balance';
 import { IssuingBalance } from '@/contracts';
 import { getStripeClient } from './stripeClient';
 import { logger } from '@/config/logger';
@@ -9,7 +10,7 @@ export async function getIssuingBalance(currency: string): Promise<IssuingBalanc
   const stripe = getStripeClient();
   const normalised = currency.toLowerCase();
 
-  let balance: Stripe.Balance;
+  let balance: Balance;
   try {
     balance = await stripe.balance.retrieve();
   } catch (err) {

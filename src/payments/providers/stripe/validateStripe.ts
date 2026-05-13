@@ -13,7 +13,7 @@ export async function validateStripeSetup(): Promise<void> {
     return;
   }
 
-  const stripe = new Stripe(key, { apiVersion: '2024-06-20' as Stripe.LatestApiVersion });
+  const stripe = new Stripe(key, { apiVersion: '2024-06-20' as typeof Stripe.API_VERSION });
 
   try {
     await stripe.issuing.cards.list({ limit: 1 });
