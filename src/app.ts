@@ -12,7 +12,7 @@ import { usersRoutes } from '@/api/routes/users';
 
 export function buildApp() {
   const fastify = Fastify({
-    logger,
+    loggerInstance: logger,
     // trustProxy unwraps x-forwarded-for set by a trusted upstream proxy so req.ip
     // returns the real client IP. Without this, reading x-forwarded-for directly is
     // client-spoofable and rate-limit keys can be bypassed.
