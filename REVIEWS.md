@@ -1,4 +1,4 @@
-# AGENTS.md
+# REVIEWS.md
 
 ## Review guidelines
 
