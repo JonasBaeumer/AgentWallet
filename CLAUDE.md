@@ -10,7 +10,7 @@ The user approves a budget → the backend issues a restricted Stripe virtual ca
 
 ## Tech Stack
 
-- **Runtime:** Node.js + TypeScript (strict mode)
+- **Runtime:** Node.js 22 + TypeScript (strict mode)
 - **HTTP:** Fastify
 - **ORM:** Prisma + PostgreSQL
 - **Queue:** BullMQ + Redis
@@ -21,6 +21,9 @@ The user approves a budget → the backend issues a restricted Stripe virtual ca
 ## Key Commands
 
 ```bash
+# Select the repository runtime
+nvm use
+
 # Install dependencies
 npm install
 

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22.x (use the version selected by `.nvmrc`)
 - Docker (for local integration tests)
 
 ## Getting started
@@ -10,6 +10,7 @@
 ```bash
 git clone https://github.com/JonasBaeumer/trustedpaymentinfrastructureforagents.git
 cd trustedpaymentinfrastructureforagents
+nvm use
 cp .env.example .env        # fill in your values
 npm ci
 docker compose up -d        # start Postgres + Redis
@@ -39,6 +40,10 @@ Every pull request targeting `main` runs four parallel jobs:
 | **Integration Tests** | Jest integration suite against Postgres 16 + Redis 7 service containers |
 
 All four checks must pass before a PR can be merged.
+
+CI and local development use Node.js 22. Coinbase dependency updates are reviewed
+through Dependabot: minor and patch releases are grouped, while major releases stay
+as separate pull requests and require an explicit compatibility review.
 
 ## Branch protection (main)
 
