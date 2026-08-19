@@ -351,10 +351,11 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 
 ## End-to-End Flow
 
-This is the full happy path after onboarding. Replace `USER_ID` / `INTENT_ID`
-with real values and export the per-agent credential returned during registration:
+This is the full happy path after onboarding. Replace `INTENT_ID` with the
+created value and export both credentials returned during user and agent setup:
 
 ```bash
+export API_KEY=your-user-api-key
 export OPENCLAW_AGENT_KEY=agk_...
 ```
 
@@ -363,12 +364,11 @@ export OPENCLAW_AGENT_KEY=agk_...
 ```bash
 curl -X POST http://localhost:3000/v1/intents \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "X-Idempotency-Key: $(uuidgen)" \
   -d '{
-    "userId": "USER_ID",
     "query": "Sony WH-1000XM5 headphones",
-    "maxBudget": 30000,
-    "currency": "eur"
+    "maxBudget": 30000
   }'
 # ← { "intentId": "clxxx...", "status": "SEARCHING" }
 ```
@@ -397,8 +397,9 @@ curl -X POST http://localhost:3000/v1/agent/quote \
 ```bash
 curl -X POST http://localhost:3000/v1/approvals/INTENT_ID/decision \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $API_KEY" \
   -H "X-Idempotency-Key: $(uuidgen)" \
-  -d '{ "decision": "APPROVED", "actorId": "USER_ID" }'
+  -d '{ "decision": "APPROVED" }'
 # ← { "status": "CARD_ISSUED" }
 # Budget reserved in ledger; virtual card issued in Stripe
 ```

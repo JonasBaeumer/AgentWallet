@@ -45,7 +45,9 @@ OpenClaw                        Backend                         User (Telegram)
   │   (store userId permanently)   │                                 │
 ```
 
-Once OpenClaw has a `userId` it can create purchase intents for that user.
+Once OpenClaw has a `userId`, the user must add the API key returned by Telegram
+to the agent's secret store. The key authenticates user-facing intent creation;
+the separate agent key authenticates subsequent agent operations.
 
 If the pairing code expires before the user signs up, call `POST /v1/agent/register` again
 with `X-Agent-Key` and an empty body. The authenticated `agentId` is stable and never
@@ -79,7 +81,8 @@ For local development the default value is `local-dev-worker-key`.
 ## Full Integration Flow
 
 > **Prerequisite:** complete [Onboarding](#onboarding-first-time-setup) before making
-> any purchase. You need a stable `agentId` and a linked `userId`.
+> any purchase. You need a stable `agentId`, linked `userId`, per-agent key,
+> and the user's API key.
 
 OpenClaw drives every step. The backend responds to requests — it never pushes to the agent.
 
@@ -228,7 +231,8 @@ Keep displaying the pairing code to the user (or renew it if expired).
 { "status": "claimed", "userId": "clxyz123" }
 ```
 
-Store `userId` permanently. Use it in all `POST /v1/intents` calls.
+Store `userId` permanently for account correlation. The user's bearer key, not
+a caller-supplied user ID, determines ownership on `POST /v1/intents`.
 
 **Error responses:**
 
@@ -243,32 +247,30 @@ Store `userId` permanently. Use it in all `POST /v1/intents` calls.
 Register a new purchase intent. Call this once per task, before posting a quote.
 Returns an `intentId` that is used in all subsequent calls.
 
-**Auth:** None (user-facing endpoint). Supply a unique `X-Idempotency-Key` header.
+**Auth:** the user's `Authorization: Bearer <api-key>`. Supply a unique
+`X-Idempotency-Key` header as well.
 
 **Headers:**
 
 | Header | Required | Description |
 |--------|----------|-------------|
+| `Authorization` | Yes | User bearer API key returned during Telegram signup |
 | `X-Idempotency-Key` | Yes | Any unique string (e.g. UUID). Prevents duplicate intents on retry. |
 
 **Request body:**
 
 | Field | Type | Required | Constraints |
 |-------|------|----------|-------------|
-| `userId` | `string` | Yes | ID of the user on whose behalf the agent is acting |
 | `query` | `string` | Yes | Free-text shopping task (e.g. "Sony WH-1000XM5 headphones"), max 500 chars |
 | `subject` | `string` | No | Short task title for notifications, max 100 chars |
 | `maxBudget` | `integer` | Yes | Maximum spend in smallest currency unit (pence/cents), max 1 000 000 |
-| `currency` | `string` | No | 3-letter ISO code, lowercase (e.g. `eur`, `gbp`); default `eur` |
 | `expiresAt` | `string` | No | ISO 8601 datetime after which the intent expires |
 
 ```json
 {
-  "userId": "user_abc123",
   "query": "Sony WH-1000XM5 headphones, black",
   "subject": "Buy Sony headphones",
-  "maxBudget": 30000,
-  "currency": "gbp"
+  "maxBudget": 30000
 }
 ```
 
@@ -287,7 +289,7 @@ Returns an `intentId` that is used in all subsequent calls.
 | Status | Condition |
 |--------|-----------|
 | `400` | Missing `X-Idempotency-Key`, or invalid fields |
-| `404` | `userId` not found |
+| `401` | Missing or invalid user bearer key |
 
 > **Note:** This endpoint also enqueues a job on the internal `search-queue`. If you are
 > running the stub worker at the same time as a real OpenClaw instance, the stub worker will
@@ -585,6 +587,7 @@ Common `declineCode` values:
 |----------|-------------|
 | `API_BASE_URL` | Base URL of the backend, e.g. `http://localhost:3000` |
 | `OPENCLAW_AGENT_KEY` | Per-instance secret returned once by registration; used as `X-Agent-Key` |
+| `AGENTPAY_API_KEY` | User bearer key returned during Telegram signup; used only on user-facing routes |
 
 ### Existing-installation migration
 

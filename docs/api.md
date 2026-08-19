@@ -105,7 +105,8 @@ land in `error` (not `message`).
 ## Conventions
 
 - All monetary amounts are **integer minor units** (e.g. cents). `maxBudget: 30000` means €300.00.
-- Currency is ISO-4217, lower case (`eur`, `gbp`, `usd`). Default is `eur`.
+- Currency is ISO-4217, lower case (`eur`, `gbp`, `usd`), and is derived from
+  the authenticated user's configured payment provider.
 - All dates are ISO-8601 UTC strings.
 - Every state-changing user-facing route requires a unique `X-Idempotency-Key` header; repeating a request with the same key replays the stored response body (see [idempotency middleware](../src/api/middleware/idempotency.ts)).
 
@@ -134,8 +135,9 @@ search job for the agent.
 | `query` | string (1–500) | yes | Natural-language shopping query |
 | `subject` | string (1–100) | no | Short human-readable subject/title |
 | `maxBudget` | int > 0, ≤ 1,000,000 | yes | Hard cap in minor units |
-| `currency` | 3-letter ISO code | no | Defaults to `eur` |
 | `expiresAt` | ISO-8601 datetime | no | Auto-expires if no terminal state by then |
+
+Currency cannot be overridden by request data.
 
 **Request example**
 
@@ -145,10 +147,8 @@ curl -X POST http://localhost:3000/v1/intents \
   -H "X-Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "userId": "usr_123",
     "query": "Sony WH-1000XM5 headphones",
-    "maxBudget": 30000,
-    "currency": "eur"
+    "maxBudget": 30000
   }'
 ```
 
@@ -752,7 +752,7 @@ INTENT_JSON=$(curl -sS -X POST "$BASE/v1/intents" \
   -H "Content-Type: application/json" \
   -H "X-Idempotency-Key: $(uuidgen)" \
   -H "$(auth_user)" \
-  -d '{"query":"Sony WH-1000XM5","maxBudget":30000,"currency":"eur"}')
+  -d '{"query":"Sony WH-1000XM5","maxBudget":30000}')
 echo "$INTENT_JSON" | tee /dev/stderr
 INTENT_ID=$(node -e "console.log(JSON.parse(process.argv[1]).intentId)" "$INTENT_JSON")
 
