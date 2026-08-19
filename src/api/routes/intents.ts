@@ -49,6 +49,7 @@ export async function intentRoutes(fastify: FastifyInstance): Promise<void> {
       const intent = await prisma.purchaseIntent.create({
         data: {
           userId,
+          agentId: user.agentId,
           query,
           subject: subject ?? null,
           maxBudget,

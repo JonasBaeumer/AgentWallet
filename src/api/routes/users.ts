@@ -49,7 +49,7 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // POST /v1/users/:userId/unlink-agent
-  // Cancels all active intents for the linked agent, then removes the agent link.
+  // Revokes the credential and agent link before cleaning up active intents.
   // Only the authenticated user may unlink their own agent.
   fastify.post<{ Params: { userId: string } }>(
     '/v1/users/:userId/unlink-agent',
@@ -70,12 +70,46 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
 
       const agentId = authedUser.agentId;
 
-      // Cancel all non-terminal intents for this user (best-effort — continue even on partial failure)
+      // Snapshot active intents while the user/agent relationship is still intact.
       const activeIntents = await prisma.purchaseIntent.findMany({
-        where: { userId, status: { in: ACTIVE_INTENT_STATUSES } },
+        where: { userId, agentId, status: { in: ACTIVE_INTENT_STATUSES } },
         select: { id: true },
       });
 
+      // Revoke access before external cleanup starts so a compromised agent
+      // cannot execute another route while cards and ledger pots are closed.
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: userId },
+          data: { agentId: null },
+        });
+
+        await tx.pairingCode.updateMany({
+          where: { agentId, claimedByUserId: userId },
+          data: {
+            claimedByUserId: null,
+            expiresAt: new Date(0),
+            credentialHash: null,
+            credentialPrefix: null,
+            credentialExpiresAt: null,
+            credentialRevokedAt: new Date(),
+            credentialVersion: { increment: 1 },
+          },
+        });
+
+        await tx.auditEvent.create({
+          data: {
+            intentId: null,
+            actor: userId,
+            agentId,
+            event: 'AGENT_UNLINKED',
+            payload: { agentId, activeIntentIds: activeIntents.map((intent) => intent.id) },
+          },
+        });
+      });
+
+      // Cleanup can touch payment providers, so keep it outside the DB
+      // transaction. Continue unlinking even when one intent needs manual repair.
       const results = await Promise.allSettled(activeIntents.map((i) => expireIntent(i.id)));
       const cancelledIntentIds = activeIntents
         .filter((_, idx) => results[idx].status === 'fulfilled')
@@ -89,31 +123,6 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
             userId,
           });
         }
-      });
-
-      // Remove agentId from user and invalidate the pairing code atomically.
-      // Setting expiresAt to epoch (new Date(0)) prevents the code from being re-claimed
-      // during the remaining TTL window after unlinking.
-      await prisma.$transaction(async (tx) => {
-        await tx.user.update({
-          where: { id: userId },
-          data: { agentId: null },
-        });
-
-        await tx.pairingCode.updateMany({
-          where: { agentId, claimedByUserId: userId },
-          data: { claimedByUserId: null, expiresAt: new Date(0) },
-        });
-
-        await tx.auditEvent.create({
-          data: {
-            intentId: null,
-            actor: userId,
-            agentId,
-            event: 'AGENT_UNLINKED',
-            payload: { agentId, cancelledIntentIds },
-          },
-        });
       });
 
       return reply.send({ unlinked: true, agentId, cancelledIntentIds });

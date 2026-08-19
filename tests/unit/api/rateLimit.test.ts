@@ -118,7 +118,10 @@ jest.mock('@/telegram/signupHandler', () => ({
 import bcrypt from 'bcryptjs';
 const TEST_RAW_KEY = 'test-api-key-for-rate-limit-tests';
 const TEST_KEY_PREFIX = TEST_RAW_KEY.slice(0, 16);
+const TEST_AGENT_ID = 'ag_rate_limit';
+const TEST_AGENT_KEY = `agk_${'r'.repeat(43)}`;
 let TEST_KEY_HASH: string;
+let TEST_AGENT_KEY_HASH: string;
 
 const dbUsers: Record<string, any> = {
   'user-rl': {
@@ -130,6 +133,7 @@ const dbUsers: Record<string, any> = {
     mccAllowlist: [],
     apiKeyHash: null,
     apiKeyPrefix: TEST_KEY_PREFIX,
+    agentId: TEST_AGENT_ID,
     paymentProvider: 'STRIPE',
   },
 };
@@ -180,6 +184,13 @@ jest.mock('@/db/client', () => ({
     pairingCode: {
       findUnique: jest.fn(({ where }: any) => {
         if (where.agentId) return Promise.resolve(dbPairingCodes[where.agentId] ?? null);
+        if (where.credentialPrefix) {
+          return Promise.resolve(
+            Object.values(dbPairingCodes).find(
+              (record: any) => record.credentialPrefix === where.credentialPrefix,
+            ) ?? null,
+          );
+        }
         const found = Object.values(dbPairingCodes).find((r: any) => r.code === where.code);
         return Promise.resolve(found ?? null);
       }),
@@ -210,6 +221,7 @@ let app: FastifyInstance;
 
 beforeAll(async () => {
   TEST_KEY_HASH = await bcrypt.hash(TEST_RAW_KEY, 10);
+  TEST_AGENT_KEY_HASH = await bcrypt.hash(TEST_AGENT_KEY, 4);
   dbUsers['user-rl'].apiKeyHash = TEST_KEY_HASH;
   app = buildApp();
   await app.ready();
@@ -225,6 +237,20 @@ beforeEach(() => {
   Object.keys(dbIntents).forEach((k) => delete dbIntents[k]);
   Object.keys(dbIdempotency).forEach((k) => delete dbIdempotency[k]);
   Object.keys(dbPairingCodes).forEach((k) => delete dbPairingCodes[k]);
+  dbPairingCodes[TEST_AGENT_ID] = {
+    id: 'pc-rate-limit',
+    agentId: TEST_AGENT_ID,
+    code: 'RATE1234',
+    claimedByUserId: 'user-rl',
+    expiresAt: new Date(Date.now() + 60_000),
+    codeIssuedAt: new Date(),
+    credentialHash: TEST_AGENT_KEY_HASH,
+    credentialPrefix: TEST_AGENT_KEY.slice(0, 16),
+    credentialExpiresAt: new Date(Date.now() + 60_000),
+    credentialVersion: 1,
+    credentialRevokedAt: null,
+    createdAt: new Date(),
+  };
 });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -394,12 +420,17 @@ describe('Per-route: POST /v1/agent/register (max 3 per IP)', () => {
 
 // ─── Per-route: GET /v1/agent/card/:intentId (max 2) ────────────────────────
 
-describe('Per-route: GET /v1/agent/card/:intentId (max 2 per intentId)', () => {
-  it('returns 429 after 2 requests with same worker-key and intentId', async () => {
+describe('Per-route: GET /v1/agent/card/:intentId (max 2 per agent)', () => {
+  it('returns 429 after 2 requests by the same authenticated agent', async () => {
     const ip = '10.4.0.1';
+    dbIntents['intent-card-rl'] = {
+      id: 'intent-card-rl',
+      userId: 'user-rl',
+      agentId: TEST_AGENT_ID,
+    };
     const responses = await fireRequests('GET', '/v1/agent/card/intent-card-rl', 3, {
       ip,
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     // First 2 should succeed (200 or service error, but not 429)
@@ -409,21 +440,45 @@ describe('Per-route: GET /v1/agent/card/:intentId (max 2 per intentId)', () => {
     expect(responses[2].statusCode).toBe(429);
   });
 
-  it('different intentIds do not share the limit', async () => {
+  it('cannot bypass the limit by changing intentId', async () => {
     const ip = '10.4.1.1';
-    // 2 requests for intent-A
+    const secondAgentId = 'ag_rate_limit_second';
+    const secondAgentKey = `agk_${'s'.repeat(43)}`;
+    dbUsers['user-rl-second'] = {
+      ...dbUsers['user-rl'],
+      id: 'user-rl-second',
+      email: 'ratelimit-second@agentpay.dev',
+      agentId: secondAgentId,
+    };
+    dbPairingCodes[secondAgentId] = {
+      ...dbPairingCodes[TEST_AGENT_ID],
+      id: 'pc-rate-limit-second',
+      agentId: secondAgentId,
+      claimedByUserId: 'user-rl-second',
+      credentialHash: await bcrypt.hash(secondAgentKey, 4),
+      credentialPrefix: secondAgentKey.slice(0, 16),
+    };
+    dbIntents['intent-A'] = {
+      id: 'intent-A',
+      userId: 'user-rl-second',
+      agentId: secondAgentId,
+    };
+    dbIntents['intent-B'] = {
+      id: 'intent-B',
+      userId: 'user-rl-second',
+      agentId: secondAgentId,
+    };
     const resA = await fireRequests('GET', '/v1/agent/card/intent-A', 2, {
       ip,
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': secondAgentKey },
     });
     expect(resA[0].statusCode).not.toBe(429);
     expect(resA[1].statusCode).not.toBe(429);
 
-    // intent-B should still be allowed
     const resB = await fireRequests('GET', '/v1/agent/card/intent-B', 1, {
       ip,
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': secondAgentKey },
     });
-    expect(resB[0].statusCode).not.toBe(429);
+    expect(resB[0].statusCode).toBe(429);
   });
 });

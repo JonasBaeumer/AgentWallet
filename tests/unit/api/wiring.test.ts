@@ -125,7 +125,11 @@ jest.mock('@/telegram/notificationService', () => ({
 import bcrypt from 'bcryptjs';
 const TEST_RAW_KEY = 'test-api-key-for-wiring-tests';
 const TEST_KEY_PREFIX = TEST_RAW_KEY.slice(0, 16);
+const TEST_AGENT_ID = 'ag_wiring';
+const TEST_AGENT_KEY = `agk_${'a'.repeat(43)}`;
+const TEST_AGENT_KEY_PREFIX = TEST_AGENT_KEY.slice(0, 16);
 let TEST_KEY_HASH: string;
+let TEST_AGENT_KEY_HASH: string;
 
 const dbUsers: Record<string, any> = {
   'user-1': {
@@ -137,6 +141,7 @@ const dbUsers: Record<string, any> = {
     mccAllowlist: [],
     apiKeyHash: null,
     apiKeyPrefix: TEST_KEY_PREFIX,
+    agentId: TEST_AGENT_ID,
     paymentProvider: 'STRIPE',
   },
 };
@@ -171,7 +176,10 @@ jest.mock('@/db/client', () => ({
         return Promise.resolve(intent);
       }),
       findUnique: jest.fn(({ where, include }: any) => {
-        const intent = dbIntents[where.id] ?? null;
+        const storedIntent = dbIntents[where.id] ?? null;
+        const intent = storedIntent
+          ? { userId: 'user-1', agentId: TEST_AGENT_ID, ...storedIntent }
+          : null;
         if (!intent || !include?.virtualCard) return Promise.resolve(intent);
         return Promise.resolve({ ...intent, virtualCard: dbVirtualCards[intent.id] ?? null });
       }),
@@ -191,6 +199,12 @@ jest.mock('@/db/client', () => ({
     pairingCode: {
       findUnique: jest.fn(({ where }: any) => {
         if (where.agentId) return Promise.resolve(dbPairingCodes[where.agentId] ?? null);
+        if (where.credentialPrefix) {
+          const found = Object.values(dbPairingCodes).find(
+            (record: any) => record.credentialPrefix === where.credentialPrefix,
+          );
+          return Promise.resolve(found ?? null);
+        }
         // lookup by code
         const found = Object.values(dbPairingCodes).find((r: any) => r.code === where.code);
         return Promise.resolve(found ?? null);
@@ -223,6 +237,7 @@ let app: FastifyInstance;
 
 beforeAll(async () => {
   TEST_KEY_HASH = await bcrypt.hash(TEST_RAW_KEY, 10);
+  TEST_AGENT_KEY_HASH = await bcrypt.hash(TEST_AGENT_KEY, 4);
   dbUsers['user-1'].apiKeyHash = TEST_KEY_HASH;
   app = buildApp();
   await app.ready();
@@ -239,6 +254,20 @@ beforeEach(() => {
   Object.keys(dbVirtualCards).forEach((k) => delete dbVirtualCards[k]);
   Object.keys(dbIdempotency).forEach((k) => delete dbIdempotency[k]);
   Object.keys(dbPairingCodes).forEach((k) => delete dbPairingCodes[k]);
+  dbPairingCodes[TEST_AGENT_ID] = {
+    id: 'pc-wiring',
+    agentId: TEST_AGENT_ID,
+    code: 'WIRE1234',
+    claimedByUserId: 'user-1',
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    codeIssuedAt: new Date(Date.now() - 6 * 60 * 1000),
+    credentialHash: TEST_AGENT_KEY_HASH,
+    credentialPrefix: TEST_AGENT_KEY_PREFIX,
+    credentialExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    credentialVersion: 1,
+    credentialRevokedAt: null,
+    createdAt: new Date(),
+  };
 });
 
 // ─── POST /v1/webhooks/stripe ─────────────────────────────────────────────────
@@ -282,6 +311,26 @@ describe('POST /v1/intents wiring', () => {
     expect(mockStartSearching).toHaveBeenCalledTimes(1);
     const intentId = mockStartSearching.mock.calls[0][0];
     expect(typeof intentId).toBe('string');
+  });
+
+  it("binds a new intent to the user's currently linked agent", async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/intents',
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'idem-agent-owner',
+        authorization: AUTH_HEADER,
+      },
+      body: JSON.stringify({ query: 'hardware wallet', maxBudget: 10000, currency: 'eur' }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    const intentId = res.json().intentId;
+    expect(dbIntents[intentId]).toMatchObject({
+      userId: 'user-1',
+      agentId: TEST_AGENT_ID,
+    });
   });
 
   it('calls enqueueSearch with correct payload after creating intent', async () => {
@@ -345,7 +394,7 @@ describe('POST /v1/agent/quote wiring', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/quote',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({
         intentId: 'intent-q1',
         merchantName: 'Amazon UK',
@@ -363,12 +412,12 @@ describe('POST /v1/agent/quote wiring', () => {
         merchantUrl: 'https://amazon.co.uk',
         price: 9999,
       }),
-      undefined,
+      TEST_AGENT_ID,
     );
-    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1', undefined);
+    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q1', TEST_AGENT_ID);
   });
 
-  it('propagates X-Agent-Id header to receiveQuote and requestApproval', async () => {
+  it('uses the verified agent identity for audit attribution', async () => {
     seedSearchingIntent('intent-q-agent');
 
     const res = await app.inject({
@@ -376,8 +425,8 @@ describe('POST /v1/agent/quote wiring', () => {
       url: '/v1/agent/quote',
       headers: {
         'content-type': 'application/json',
-        'x-worker-key': 'test-worker-key',
-        'x-agent-id': 'ag_from_header',
+        'x-agent-key': TEST_AGENT_KEY,
+        'x-agent-id': TEST_AGENT_ID,
       },
       body: JSON.stringify({
         intentId: 'intent-q-agent',
@@ -392,9 +441,9 @@ describe('POST /v1/agent/quote wiring', () => {
     expect(mockReceiveQuote).toHaveBeenCalledWith(
       'intent-q-agent',
       expect.any(Object),
-      'ag_from_header',
+      TEST_AGENT_ID,
     );
-    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q-agent', 'ag_from_header');
+    expect(mockRequestApproval).toHaveBeenCalledWith('intent-q-agent', TEST_AGENT_ID);
   });
 
   it('does NOT call receiveQuote for non-SEARCHING intent', async () => {
@@ -403,7 +452,7 @@ describe('POST /v1/agent/quote wiring', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/agent/quote',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({
         intentId: 'intent-q2',
         merchantName: 'X',
@@ -423,7 +472,7 @@ describe('POST /v1/agent/quote wiring', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/agent/quote',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({
         intentId: 'intent-q3',
         merchantName: 'Amazon UK',
@@ -715,12 +764,12 @@ describe('POST /v1/agent/result wiring — success', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({ intentId: 'intent-r1', success: true, actualAmount: 8000 }),
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-r1', 8000, undefined);
+    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-r1', 8000, TEST_AGENT_ID);
     expect(mockSettleIntent).toHaveBeenCalledWith('intent-r1', 8000);
     expect(mockFailCheckout).not.toHaveBeenCalled();
     expect(mockReturnIntent).not.toHaveBeenCalled();
@@ -732,7 +781,7 @@ describe('POST /v1/agent/result wiring — success', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({ intentId: 'intent-r2', success: true, actualAmount: 5000 }),
     });
 
@@ -745,7 +794,7 @@ describe('POST /v1/agent/result wiring — success', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({ intentId: 'intent-r3', success: true, actualAmount: 5000 }),
     });
 
@@ -764,7 +813,7 @@ describe('POST /v1/agent/result wiring — failure', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({
         intentId: 'intent-f1',
         success: false,
@@ -773,13 +822,13 @@ describe('POST /v1/agent/result wiring — failure', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f1', 'Payment declined', undefined);
+    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f1', 'Payment declined', TEST_AGENT_ID);
     expect(mockReturnIntent).toHaveBeenCalledWith('intent-f1');
     expect(mockCompleteCheckout).not.toHaveBeenCalled();
     expect(mockSettleIntent).not.toHaveBeenCalled();
   });
 
-  it('propagates X-Agent-Id header to failCheckout', async () => {
+  it('uses the verified agent identity when reporting failure', async () => {
     seedRunningIntent('intent-f-agent');
 
     await app.inject({
@@ -787,13 +836,13 @@ describe('POST /v1/agent/result wiring — failure', () => {
       url: '/v1/agent/result',
       headers: {
         'content-type': 'application/json',
-        'x-worker-key': 'test-worker-key',
-        'x-agent-id': 'ag_from_header',
+        'x-agent-key': TEST_AGENT_KEY,
+        'x-agent-id': TEST_AGENT_ID,
       },
       body: JSON.stringify({ intentId: 'intent-f-agent', success: false, errorMessage: 'nope' }),
     });
 
-    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f-agent', 'nope', 'ag_from_header');
+    expect(mockFailCheckout).toHaveBeenCalledWith('intent-f-agent', 'nope', TEST_AGENT_ID);
   });
 
   it('calls cancelCard after failed checkout', async () => {
@@ -802,7 +851,7 @@ describe('POST /v1/agent/result wiring — failure', () => {
     await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({ intentId: 'intent-f2', success: false, errorMessage: 'timeout' }),
     });
 
@@ -815,7 +864,7 @@ describe('POST /v1/agent/result wiring — failure', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({ intentId: 'intent-f3', success: false }),
     });
 
@@ -827,10 +876,11 @@ describe('POST /v1/agent/result wiring — failure', () => {
 
 describe('GET /v1/agent/card/:intentId wiring', () => {
   it('delegates to cardService.revealCard', async () => {
+    dbIntents['intent-c1'] = { id: 'intent-c1', status: IntentStatus.CARD_ISSUED };
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/card/intent-c1',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(mockRevealCard).toHaveBeenCalledWith('intent-c1');
@@ -842,12 +892,13 @@ describe('GET /v1/agent/card/:intentId wiring', () => {
 
   it('returns 409 when CardAlreadyRevealedError is thrown', async () => {
     const { CardAlreadyRevealedError } = await import('@/contracts');
+    dbIntents['intent-c2'] = { id: 'intent-c2', status: IntentStatus.CARD_ISSUED };
     mockRevealCard.mockRejectedValueOnce(new CardAlreadyRevealedError('intent-c2'));
 
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/card/intent-c2',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(409);
@@ -856,12 +907,13 @@ describe('GET /v1/agent/card/:intentId wiring', () => {
 
   it('returns 404 when IntentNotFoundError is thrown', async () => {
     const { IntentNotFoundError } = await import('@/contracts');
+    dbIntents['intent-c3'] = { id: 'intent-c3', status: IntentStatus.CARD_ISSUED };
     mockRevealCard.mockRejectedValueOnce(new IntentNotFoundError('intent-c3'));
 
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/card/intent-c3',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(404);
@@ -901,7 +953,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/nonexistent',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
     expect(res.statusCode).toBe(404);
   });
@@ -912,7 +964,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/intent-dec3',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -926,7 +978,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/intent-dec4',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -940,7 +992,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/intent-dec5',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -959,7 +1011,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/intent-dec6',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -977,7 +1029,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/intent-dec7',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -992,7 +1044,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/intent-dec8',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -1008,7 +1060,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/intent-dec9',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -1021,7 +1073,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/decision/intent-dec10',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
@@ -1036,7 +1088,7 @@ describe('GET /v1/agent/decision/:intentId wiring', () => {
 // ─── POST /v1/agent/register ──────────────────────────────────────────────────
 
 describe('POST /v1/agent/register wiring', () => {
-  it('returns 401 without X-Worker-Key', async () => {
+  it('returns 401 without a bootstrap or agent credential', async () => {
     const res = await app.inject({ method: 'POST', url: '/v1/agent/register', payload: {} });
     expect(res.statusCode).toBe(401);
   });
@@ -1054,52 +1106,52 @@ describe('POST /v1/agent/register wiring', () => {
     expect(body.agentId).toMatch(/^ag_/);
     expect(body.pairingCode).toMatch(/^[A-Z0-9]{8}$/);
     expect(body.expiresAt).toBeDefined();
+    expect(body.agentKey).toMatch(/^agk_/);
+    expect(body.agentKeyExpiresAt).toBeDefined();
   });
 
-  it('returns 404 when renewing with unknown agentId', async () => {
+  it('rejects a caller-supplied agentId during bootstrap', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/register',
       headers: { 'x-worker-key': 'test-worker-key' },
       payload: { agentId: 'ag_nonexistent' },
     });
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(400);
   });
 
-  it('returns 409 when renewing an already-claimed agent', async () => {
-    dbPairingCodes['ag_claimed'] = {
-      id: 'pc-1',
-      agentId: 'ag_claimed',
-      code: 'AAAABBBB',
-      claimedByUserId: 'user-existing',
-      expiresAt: new Date(Date.now() + 60_000),
-      createdAt: new Date(),
-    };
-
+  it('returns 409 when an authenticated claimed agent requests renewal', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/register',
-      headers: { 'x-worker-key': 'test-worker-key' },
-      payload: { agentId: 'ag_claimed' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
+      payload: {},
     });
     expect(res.statusCode).toBe(409);
   });
 
   it('renews code for unclaimed agent', async () => {
+    const renewalKey = `agk_${'b'.repeat(43)}`;
     dbPairingCodes['ag_renew'] = {
       id: 'pc-2',
       agentId: 'ag_renew',
       code: 'OLDCOD12',
       claimedByUserId: null,
       expiresAt: new Date(Date.now() + 60_000),
-      createdAt: new Date(Date.now() - 6 * 60 * 1000), // 6 min ago — past cooldown
+      codeIssuedAt: new Date(Date.now() - 6 * 60 * 1000),
+      credentialHash: await bcrypt.hash(renewalKey, 4),
+      credentialPrefix: renewalKey.slice(0, 16),
+      credentialExpiresAt: new Date(Date.now() + 60_000),
+      credentialVersion: 1,
+      credentialRevokedAt: null,
+      createdAt: new Date(),
     };
 
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/register',
-      headers: { 'x-worker-key': 'test-worker-key' },
-      payload: { agentId: 'ag_renew' },
+      headers: { 'x-agent-key': renewalKey },
+      payload: {},
     });
 
     expect(res.statusCode).toBe(200);
@@ -1112,44 +1164,52 @@ describe('POST /v1/agent/register wiring', () => {
 // ─── GET /v1/agent/user ───────────────────────────────────────────────────────
 
 describe('GET /v1/agent/user wiring', () => {
-  it('returns 401 without X-Worker-Key', async () => {
+  it('returns 401 without X-Agent-Key', async () => {
     const res = await app.inject({ method: 'GET', url: '/v1/agent/user' });
     expect(res.statusCode).toBe(401);
   });
 
-  it('returns 400 when X-Agent-Id header is missing', async () => {
+  it('resolves identity without requiring X-Agent-Id', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/user',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
-    expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('X-Agent-Id');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({ status: 'claimed', userId: 'user-1' });
   });
 
-  it('returns 404 when agentId is unknown', async () => {
+  it('rejects an X-Agent-Id that disagrees with the credential', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/user',
-      headers: { 'x-worker-key': 'test-worker-key', 'x-agent-id': 'ag_unknown' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY, 'x-agent-id': 'ag_unknown' },
     });
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).code).toBe('agent_identity_mismatch');
   });
 
   it('returns unclaimed status when code not yet used', async () => {
+    const pendingKey = `agk_${'c'.repeat(43)}`;
     dbPairingCodes['ag_pending'] = {
       id: 'pc-3',
       agentId: 'ag_pending',
       code: 'PEND1234',
       claimedByUserId: null,
       expiresAt: new Date(Date.now() + 60_000),
+      codeIssuedAt: new Date(),
+      credentialHash: await bcrypt.hash(pendingKey, 4),
+      credentialPrefix: pendingKey.slice(0, 16),
+      credentialExpiresAt: new Date(Date.now() + 60_000),
+      credentialVersion: 1,
+      credentialRevokedAt: null,
       createdAt: new Date(),
     };
 
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/user',
-      headers: { 'x-worker-key': 'test-worker-key', 'x-agent-id': 'ag_pending' },
+      headers: { 'x-agent-key': pendingKey },
     });
 
     expect(res.statusCode).toBe(200);
@@ -1157,25 +1217,16 @@ describe('GET /v1/agent/user wiring', () => {
   });
 
   it('returns claimed status with userId after user signs up', async () => {
-    dbPairingCodes['ag_done'] = {
-      id: 'pc-4',
-      agentId: 'ag_done',
-      code: 'DONE1234',
-      claimedByUserId: 'user-signup-1',
-      expiresAt: new Date(Date.now() + 60_000),
-      createdAt: new Date(),
-    };
-
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/user',
-      headers: { 'x-worker-key': 'test-worker-key', 'x-agent-id': 'ag_done' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.status).toBe('claimed');
-    expect(body.userId).toBe('user-signup-1');
+    expect(body.userId).toBe('user-1');
   });
 });
 

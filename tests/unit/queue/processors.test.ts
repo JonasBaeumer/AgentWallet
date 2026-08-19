@@ -29,11 +29,11 @@ describe('searchProcessor logic', () => {
       },
     };
     const apiBase = 'http://localhost:3000';
-    const workerKey = 'local-dev-worker-key';
+    const agentKey = `agk_${'q'.repeat(43)}`;
 
     await fetch(`${apiBase}/v1/agent/quote`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Worker-Key': workerKey },
+      headers: { 'Content-Type': 'application/json', 'X-Agent-Key': agentKey },
       body: JSON.stringify({
         intentId: job.data.intentId,
         merchantName: 'Amazon UK',
@@ -47,7 +47,7 @@ describe('searchProcessor logic', () => {
       'http://localhost:3000/v1/agent/quote',
       expect.objectContaining({
         method: 'POST',
-        headers: expect.objectContaining({ 'X-Worker-Key': 'local-dev-worker-key' }),
+        headers: expect.objectContaining({ 'X-Agent-Key': agentKey }),
       }),
     );
   });
@@ -57,11 +57,11 @@ describe('searchProcessor logic', () => {
 
     const job = { data: { intentId: 'intent-1', price: 9999 } };
     const apiBase = 'http://localhost:3000';
-    const workerKey = 'local-dev-worker-key';
+    const agentKey = `agk_${'q'.repeat(43)}`;
 
     await fetch(`${apiBase}/v1/agent/result`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Worker-Key': workerKey },
+      headers: { 'Content-Type': 'application/json', 'X-Agent-Key': agentKey },
       body: JSON.stringify({
         intentId: job.data.intentId,
         success: true,

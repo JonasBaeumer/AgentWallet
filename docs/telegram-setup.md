@@ -193,11 +193,15 @@ Users are created through the OpenClaw-initiated pairing flow — **not** throug
 
 ```bash
 curl -X POST http://localhost:3000/v1/agent/register \
-  -H "X-Worker-Key: local-dev-worker-key"
-# → { "agentId": "ag_abc123", "pairingCode": "AB3X9K2M", "expiresAt": "..." }
+  -H "X-Worker-Key: local-dev-worker-key" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# → { "agentId": "ag_abc123", "agentKey": "agk_...", "pairingCode": "AB3X9K2M", ... }
 ```
 
-OpenClaw stores the `agentId` permanently and gives the user the pairing code along with the bot username.
+OpenClaw stores `agentId` and the one-time `agentKey` in its secret store, then
+gives the user the pairing code and bot username. The shared worker key stays on
+the backend and is never stored in OpenClaw.
 
 **What the user does in Telegram:**
 
@@ -211,12 +215,13 @@ After this, OpenClaw can resolve the `userId`:
 
 ```bash
 curl http://localhost:3000/v1/agent/user \
-  -H "X-Worker-Key: local-dev-worker-key" \
-  -H "X-Agent-Id: ag_abc123"
+  -H "X-Agent-Key: agk_..."
 # → { "status": "claimed", "userId": "clxyz..." }
 ```
 
-The pairing code is valid for 30 minutes. If it expires before the user signs up, OpenClaw calls `POST /v1/agent/register` again with `{ "agentId": "ag_abc123" }` to get a fresh code.
+The pairing code is valid for 10 minutes. If it expires before signup, OpenClaw
+calls `POST /v1/agent/register` with `X-Agent-Key` and an empty JSON body to get
+a fresh code. Caller-supplied agent IDs are not accepted.
 
 ### Step 6B — Test it
 
@@ -258,7 +263,7 @@ With `TELEGRAM_TEST_CHANNEL_ID` set, all live integration tests route to the gro
 | No Telegram message arrives | Bot token not loaded | Restart the server after editing `.env` |
 | `/start <code>` gives no reply | Webhook not registered or wrong URL | Re-run Step 4 with the current ngrok URL |
 | `"chat not found"` error in logs | User never sent a message to the bot | User must send `/start <code>` first (Step 5) |
-| `"invalid or expired code"` reply | Code expired (30 min TTL) | OpenClaw calls `POST /v1/agent/register` with existing `agentId` to renew |
+| `"invalid or expired code"` reply | Code expired (10 min TTL) | OpenClaw calls `POST /v1/agent/register` with its `X-Agent-Key` and `{}` to renew |
 | Buttons do nothing | Webhook not registered or ngrok restarted | Re-run Step 4 with the current ngrok URL |
 | `401` on webhook endpoint | Wrong `TELEGRAM_WEBHOOK_SECRET` | Ensure `.env` value matches the `secret_token` in Step 4 |
 | ngrok auth error | No authtoken configured | Run `ngrok config add-authtoken <token>` |

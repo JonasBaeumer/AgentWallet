@@ -17,10 +17,10 @@ describe('agentContextHook', () => {
     return { req, childSpy };
   }
 
-  it('sets request.agentId from X-Agent-Id header', async () => {
+  it('does not trust X-Agent-Id as authenticated identity', async () => {
     const { req } = makeRequest({ headers: { 'x-agent-id': 'ag_abc123' } });
     await agentContextHook(req);
-    expect(req.agentId).toBe('ag_abc123');
+    expect(req.agentId).toBeUndefined();
   });
 
   it('leaves request.agentId undefined when header is missing', async () => {
@@ -37,13 +37,19 @@ describe('agentContextHook', () => {
 
   it('enriches req.log with agentId, intentId from params, and route', async () => {
     const { req, childSpy } = makeRequest({
-      headers: { 'x-agent-id': 'ag_abc123' },
+      authenticatedAgent: {
+        id: 'ag_abc123',
+        userId: 'user-123',
+        credentialVersion: 1,
+        credentialExpiresAt: new Date(Date.now() + 60_000),
+      },
       params: { intentId: 'intent-99' },
       routeOptions: { url: '/v1/agent/card/:intentId' },
     });
     await agentContextHook(req);
     expect(childSpy).toHaveBeenCalledWith({
       agentId: 'ag_abc123',
+      agentUserId: 'user-123',
       intentId: 'intent-99',
       route: '/v1/agent/card/:intentId',
     });
@@ -65,6 +71,7 @@ describe('agentContextHook', () => {
     await agentContextHook(req);
     expect(childSpy).toHaveBeenCalledWith({
       agentId: null,
+      agentUserId: null,
       intentId: null,
       route: '/v1/agent/quote',
     });

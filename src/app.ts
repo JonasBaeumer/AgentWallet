@@ -40,10 +40,12 @@ export function buildApp() {
     const { getRedisClient } = require('@/config/redis');
     fastify.register(rateLimit, {
       global: true,
+      hook: 'preHandler',
       max: 60,
       timeWindow: '1 minute',
       redis: getRedisClient(),
-      keyGenerator: (req) => req.ip ?? 'unknown',
+      keyGenerator: (req) =>
+        req.authenticatedAgent?.id ? `agent:${req.authenticatedAgent.id}` : (req.ip ?? 'unknown'),
       errorResponseBuilder: (_req, context) => ({
         statusCode: 429,
         error: 'rate_limit_exceeded',

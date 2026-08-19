@@ -1,7 +1,10 @@
 import bcrypt from 'bcryptjs';
 
 const RAW_API_KEY = 'test-api-key-for-error-paths';
+const TEST_AGENT_ID = 'ag_error_paths';
+const TEST_AGENT_KEY = `agk_${'e'.repeat(43)}`;
 let API_KEY_HASH: string;
+let AGENT_KEY_HASH: string;
 const TEST_USER: Record<string, any> = {
   id: 'user-err-test',
   email: 'errtest@agentpay.dev',
@@ -11,6 +14,7 @@ const TEST_USER: Record<string, any> = {
   mccAllowlist: [],
   apiKeyHash: '', // populated in beforeAll
   apiKeyPrefix: '', // populated in beforeAll
+  agentId: TEST_AGENT_ID,
 };
 
 jest.mock('@/config/env', () => ({
@@ -101,6 +105,21 @@ const mockDb = {
     update: jest.fn(),
   },
   ledgerEntry: { create: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+  pairingCode: {
+    findUnique: jest.fn(({ where }: any) => {
+      if (where.credentialPrefix === TEST_AGENT_KEY.slice(0, 16)) {
+        return Promise.resolve({
+          agentId: TEST_AGENT_ID,
+          claimedByUserId: TEST_USER.id,
+          credentialHash: AGENT_KEY_HASH,
+          credentialExpiresAt: new Date(Date.now() + 60_000),
+          credentialVersion: 1,
+          credentialRevokedAt: null,
+        });
+      }
+      return Promise.resolve(null);
+    }),
+  },
   $transaction: jest.fn(),
 };
 
@@ -114,6 +133,7 @@ let authHeader: string;
 
 beforeAll(async () => {
   API_KEY_HASH = await bcrypt.hash(RAW_API_KEY, 10);
+  AGENT_KEY_HASH = await bcrypt.hash(TEST_AGENT_KEY, 4);
   TEST_USER.apiKeyHash = API_KEY_HASH;
   TEST_USER.apiKeyPrefix = RAW_API_KEY.slice(0, 16);
   authHeader = `Bearer ${RAW_API_KEY}`;
@@ -128,7 +148,7 @@ afterAll(async () => {
 
 beforeEach(() => jest.clearAllMocks());
 
-describe('Auth: X-Worker-Key enforcement', () => {
+describe('Auth: X-Agent-Key enforcement', () => {
   it('401 on /v1/agent/quote without key', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -149,7 +169,7 @@ describe('Auth: X-Worker-Key enforcement', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'wrong' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': 'wrong' },
       body: JSON.stringify({ intentId: 'x', success: true }),
     });
     expect(res.statusCode).toBe(401);
@@ -159,6 +179,71 @@ describe('Auth: X-Worker-Key enforcement', () => {
     const res = await app.inject({ method: 'GET', url: '/v1/agent/card/intent-1' });
     expect(res.statusCode).toBe(401);
   });
+});
+
+describe('Agent intent ownership enforcement', () => {
+  const foreignIntent = {
+    id: 'foreign-intent',
+    userId: 'foreign-user',
+    agentId: 'ag_foreign',
+    status: 'SEARCHING',
+    metadata: {},
+    maxBudget: 1000,
+    currency: 'eur',
+  };
+  const cases = [
+    {
+      name: 'quote',
+      request: {
+        method: 'POST' as const,
+        url: '/v1/agent/quote',
+        payload: {
+          intentId: foreignIntent.id,
+          merchantName: 'Merchant',
+          merchantUrl: 'https://merchant.example',
+          price: 100,
+          currency: 'eur',
+        },
+      },
+    },
+    {
+      name: 'result',
+      request: {
+        method: 'POST' as const,
+        url: '/v1/agent/result',
+        payload: { intentId: foreignIntent.id, success: true, actualAmount: 100 },
+      },
+    },
+    {
+      name: 'decision',
+      request: {
+        method: 'GET' as const,
+        url: `/v1/agent/decision/${foreignIntent.id}`,
+      },
+    },
+    {
+      name: 'card',
+      request: {
+        method: 'GET' as const,
+        url: `/v1/agent/card/${foreignIntent.id}`,
+      },
+    },
+  ];
+
+  it.each(cases)(
+    'returns 403 when an agent accesses a foreign $name route',
+    async ({ request }) => {
+      mockDb.purchaseIntent.findUnique.mockResolvedValueOnce(foreignIntent);
+
+      const response = await app.inject({
+        ...request,
+        headers: { 'x-agent-key': TEST_AGENT_KEY },
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json().code).toBe('agent_intent_forbidden');
+    },
+  );
 });
 
 describe('Auth: user API key enforcement', () => {
@@ -217,10 +302,15 @@ describe('Card reveal enforcement', () => {
   it('409 on second card reveal', async () => {
     const { CardAlreadyRevealedError } = require('@/contracts');
     mockRevealCard.mockRejectedValueOnce(new CardAlreadyRevealedError('i1'));
+    mockDb.purchaseIntent.findUnique.mockResolvedValueOnce({
+      id: 'i1',
+      userId: TEST_USER.id,
+      agentId: TEST_AGENT_ID,
+    });
     const res = await app.inject({
       method: 'GET',
       url: '/v1/agent/card/i1',
-      headers: { 'x-worker-key': 'test-worker-key' },
+      headers: { 'x-agent-key': TEST_AGENT_KEY },
     });
     expect(res.statusCode).toBe(409);
   });
@@ -228,11 +318,16 @@ describe('Card reveal enforcement', () => {
 
 describe('State transition guards', () => {
   it('409 when posting quote to non-SEARCHING intent', async () => {
-    mockDb.purchaseIntent.findUnique.mockResolvedValueOnce({ id: 'i1', status: 'DONE' });
+    mockDb.purchaseIntent.findUnique.mockResolvedValueOnce({
+      id: 'i1',
+      userId: TEST_USER.id,
+      agentId: TEST_AGENT_ID,
+      status: 'DONE',
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/quote',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({
         intentId: 'i1',
         merchantName: 'T',
@@ -265,11 +360,16 @@ describe('State transition guards', () => {
   });
 
   it('409 when posting result to non-CHECKOUT_RUNNING intent', async () => {
-    mockDb.purchaseIntent.findUnique.mockResolvedValueOnce({ id: 'i1', status: 'APPROVED' });
+    mockDb.purchaseIntent.findUnique.mockResolvedValueOnce({
+      id: 'i1',
+      userId: TEST_USER.id,
+      agentId: TEST_AGENT_ID,
+      status: 'APPROVED',
+    });
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': TEST_AGENT_KEY },
       body: JSON.stringify({ intentId: 'i1', success: true }),
     });
     expect(res.statusCode).toBe(409);

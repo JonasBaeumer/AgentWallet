@@ -174,7 +174,8 @@ Every purchase is a `PurchaseIntent` tracked through an explicit state machine. 
 │   │   │   ├── telegram.ts      # POST /v1/users/:userId/link-telegram
 │   │   │   └── debug.ts         # GET /v1/debug/* (intents, ledger, audit, jobs)
 │   │   ├── middleware/
-│   │   │   ├── auth.ts          # X-Worker-Key verification
+│   │   │   ├── auth.ts          # Registration bootstrap authentication
+│   │   │   ├── agentAuth.ts     # Per-agent authentication + ownership
 │   │   │   └── idempotency.ts   # X-Idempotency-Key replay
 │   │   └── validators/          # Zod schemas for each route
 │   │
@@ -257,7 +258,7 @@ Every purchase is a `PurchaseIntent` tracked through an explicit state machine. 
 
 ### Prerequisites
 
-- **Node.js** 18+
+- **Node.js** 22.x
 - **Docker** (for Postgres + Redis)
 - **Stripe account** with Issuing enabled — see [docs/stripe-setup.md](docs/stripe-setup.md) for the full walkthrough
 - **Telegram bot token** (optional) — for approval notifications and user signup; see [docs/telegram-setup.md](docs/telegram-setup.md)
@@ -278,7 +279,8 @@ STRIPE_SECRET_KEY=sk_test_...
 WORKER_API_KEY=local-dev-worker-key
 ```
 
-Everything else has safe defaults for local development.
+`WORKER_API_KEY` is a backend-only registration bootstrap secret. Do not put it
+in an agent runtime or client application.
 
 ### 2. Start infrastructure
 
@@ -299,9 +301,16 @@ npm run seed            # creates demo user: demo@agentpay.dev, £1 000 balance
 npm run dev             # hot-reload dev server on http://localhost:3000
 ```
 
-### 5. (Optional) Start the stub worker
+### 5. (Optional) Register and start the stub worker
 
-The stub worker simulates an OpenClaw agent: it picks up search jobs, posts a fake quote, then picks up checkout jobs and posts a result. This lets you exercise the full flow locally without a real agent.
+The stub worker simulates a single OpenClaw agent: it picks up search jobs,
+posts a fake quote, then picks up checkout jobs and posts a result. Register and
+pair it first using the [OpenClaw onboarding flow](docs/openclaw.md#onboarding-flow),
+then store the one-time returned credential in `.env`:
+
+```env
+OPENCLAW_AGENT_KEY=agk_...
+```
 
 ```bash
 npm run worker
@@ -342,7 +351,12 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 
 ## End-to-End Flow
 
-This is the full happy path. Replace `USER_ID` / `INTENT_ID` with real values.
+This is the full happy path after onboarding. Replace `USER_ID` / `INTENT_ID`
+with real values and export the per-agent credential returned during registration:
+
+```bash
+export OPENCLAW_AGENT_KEY=agk_...
+```
 
 ### Step 1 — Create a purchase intent
 
@@ -366,7 +380,7 @@ The intent is immediately enqueued on `search-queue` for the agent to pick up.
 ```bash
 curl -X POST http://localhost:3000/v1/agent/quote \
   -H "Content-Type: application/json" \
-  -H "X-Worker-Key: local-dev-worker-key" \
+  -H "X-Agent-Key: $OPENCLAW_AGENT_KEY" \
   -d '{
     "intentId": "INTENT_ID",
     "merchantName": "Amazon DE",
@@ -393,7 +407,7 @@ curl -X POST http://localhost:3000/v1/approvals/INTENT_ID/decision \
 
 ```bash
 curl http://localhost:3000/v1/agent/decision/INTENT_ID \
-  -H "X-Worker-Key: local-dev-worker-key"
+  -H "X-Agent-Key: $OPENCLAW_AGENT_KEY"
 # ← {
 #     "intentId": "INTENT_ID",
 #     "status": "APPROVED",
@@ -421,7 +435,7 @@ curl -X POST http://localhost:3000/v1/checkout/simulate \
 ```bash
 curl -X POST http://localhost:3000/v1/agent/result \
   -H "Content-Type: application/json" \
-  -H "X-Worker-Key: local-dev-worker-key" \
+  -H "X-Agent-Key: $OPENCLAW_AGENT_KEY" \
   -d '{
     "intentId": "INTENT_ID",
     "success": true,
@@ -481,16 +495,17 @@ error tables, and an end-to-end curl walkthrough — see
 | `GET` | `/v1/intents/:id` | — | Get intent + full audit history |
 | `POST` | `/v1/approvals/:id/decision` | — | Approve or deny intent (`X-Idempotency-Key` required) |
 
-### Agent / worker endpoints
+### Agent endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/v1/agent/register` | `X-Worker-Key` | Register an OpenClaw instance; get a pairing code |
-| `GET` | `/v1/agent/user` | `X-Worker-Key` + `X-Agent-Id` | Resolve `userId` after user completes signup |
-| `POST` | `/v1/agent/quote` | `X-Worker-Key` | Post search quote for a `SEARCHING` intent |
-| `GET` | `/v1/agent/decision/:intentId` | `X-Worker-Key` | Poll approval status; returns `checkout` params when approved |
-| `POST` | `/v1/agent/result` | `X-Worker-Key` | Report checkout outcome; finalises the intent |
-| `GET` | `/v1/agent/card/:intentId` | `X-Worker-Key` | One-time raw card reveal (alternative to the decision flow) |
+| `POST` | `/v1/agent/register` | Bootstrap `X-Worker-Key` or renewal `X-Agent-Key` | Register an instance or renew an unclaimed pairing code |
+| `GET` | `/v1/agent/user` | `X-Agent-Key` | Resolve `userId` after user completes signup |
+| `POST` | `/v1/agent/credential/rotate` | `X-Agent-Key` | Rotate the per-agent credential |
+| `POST` | `/v1/agent/quote` | `X-Agent-Key` | Post search quote for an owned `SEARCHING` intent |
+| `GET` | `/v1/agent/decision/:intentId` | `X-Agent-Key` | Poll approval status for an owned intent |
+| `POST` | `/v1/agent/result` | `X-Agent-Key` | Report checkout outcome for an owned intent |
+| `GET` | `/v1/agent/card/:intentId` | `X-Agent-Key` | One-time raw card reveal for an owned intent |
 
 ### Checkout simulation
 
@@ -542,7 +557,8 @@ Copy `.env.example` to `.env` and fill in:
 | `REDIS_URL` | Yes | `redis://localhost:6379` | Redis connection string |
 | `STRIPE_SECRET_KEY` | Yes | — | Stripe test-mode key (`sk_test_...`) |
 | `STRIPE_WEBHOOK_SECRET` | Yes | — | Stripe webhook signing secret (`whsec_...`) |
-| `WORKER_API_KEY` | Yes | `local-dev-worker-key` | Shared secret for agent endpoints |
+| `WORKER_API_KEY` | Yes | `local-dev-worker-key` | Server-side bootstrap secret for initial agent registration only |
+| `OPENCLAW_AGENT_KEY` | Stub worker only | — | One-time per-agent credential returned by registration |
 | `TELEGRAM_BOT_TOKEN` | No | — | Telegram bot token from @BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | No | — | Secret token for Telegram webhook verification |
 | `TELEGRAM_TEST_CHAT_ID` | No | — | Chat ID for local integration smoke tests (main bot DM) |
@@ -586,7 +602,8 @@ Integration tests are skipped automatically when `STRIPE_SECRET_KEY` is not a `s
 | Overspending | Stripe Issuing `spending_limits: [{ amount, interval: 'per_authorization' }]` enforced at the card network level. |
 | One-time card use | Card is cancelled immediately after checkout succeeds or fails. |
 | Double-spending | `revealedAt` prevents a second card reveal; `settleIntent` / `returnIntent` are idempotent. |
-| Worker key leakage | `X-Worker-Key` is a server-side secret never sent to the end user. Restricted Stripe keys (`rk_*`) are recommended for production. |
+| Agent credential leakage | Every agent has a rotatable, expiring credential. Only its bcrypt verifier and lookup prefix are stored; verified agent and user ownership is enforced on every operational route. |
+| Bootstrap key leakage | `X-Worker-Key` is server-side and accepted only for first registration. It is never shipped with an agent or sent to an end user. |
 | Webhook spoofing | Stripe webhooks verified via `stripe.webhooks.constructEvent()`. Telegram webhooks verified via secret token header. |
 | Double-processing | `X-Idempotency-Key` middleware stores and replays responses. Approval decisions use `intentId` as their idempotency key. |
 

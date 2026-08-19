@@ -6,7 +6,7 @@ import { logger } from '@/config/logger';
 const log = logger.child({ module: 'worker/processors/checkoutProcessor' });
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
-const WORKER_KEY = process.env.WORKER_API_KEY || 'local-dev-worker-key';
+const AGENT_KEY = process.env.OPENCLAW_AGENT_KEY;
 
 export function createCheckoutWorker(): Worker {
   return new Worker(
@@ -14,6 +14,10 @@ export function createCheckoutWorker(): Worker {
     async (job: Job<CheckoutIntentJob>) => {
       const { intentId, price } = job.data;
       log.info({ intentId }, 'Processing checkout job');
+
+      if (!AGENT_KEY) {
+        throw new Error('OPENCLAW_AGENT_KEY is required by the stub checkout worker');
+      }
 
       // Simulate checkout work
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -23,7 +27,7 @@ export function createCheckoutWorker(): Worker {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Worker-Key': WORKER_KEY,
+          'X-Agent-Key': AGENT_KEY,
         },
         body: JSON.stringify({
           intentId,

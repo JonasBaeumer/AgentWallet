@@ -10,6 +10,7 @@ export const logger = pino(
         'req.headers.authorization',
         'req.headers["stripe-signature"]',
         'req.headers["x-worker-key"]',
+        'req.headers["x-agent-key"]',
       ],
       censor: '[REDACTED]',
     },

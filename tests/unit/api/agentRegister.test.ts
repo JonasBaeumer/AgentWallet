@@ -1,7 +1,7 @@
 /**
  * Unit tests for POST /v1/agent/register security hardening (issue #15):
  * - TTL shortened to 10 minutes
- * - Per-agentId renewal cooldown (429 within 5 min of last issuance)
+ * - Per-agent credential renewal cooldown (429 within 5 min of last issuance)
  */
 
 jest.mock('@/config/env', () => ({
@@ -15,6 +15,8 @@ jest.mock('@/config/env', () => ({
     REDIS_URL: 'redis://localhost:6379',
   },
 }));
+
+import bcrypt from 'bcryptjs';
 
 // Stub all modules that agentRoutes depends on but are irrelevant to this test
 jest.mock('@/orchestrator/intentService', () => ({
@@ -68,9 +70,17 @@ jest.mock('@/db/client', () => ({
     },
     auditEvent: { create: jest.fn() },
     pairingCode: {
-      findUnique: jest.fn(({ where }: any) =>
-        Promise.resolve(dbPairingCodes[where.agentId] ?? null),
-      ),
+      findUnique: jest.fn(({ where }: any) => {
+        if (where.agentId) return Promise.resolve(dbPairingCodes[where.agentId] ?? null);
+        if (where.credentialPrefix) {
+          return Promise.resolve(
+            Object.values(dbPairingCodes).find(
+              (record: any) => record.credentialPrefix === where.credentialPrefix,
+            ) ?? null,
+          );
+        }
+        return Promise.resolve(null);
+      }),
       create: jest.fn(({ data }: any) => {
         const record = { id: `pc-${Date.now()}`, ...data, createdAt: new Date() };
         dbPairingCodes[record.agentId] = record;
@@ -91,8 +101,11 @@ import { buildApp } from '@/app';
 import type { FastifyInstance } from 'fastify';
 
 let app: FastifyInstance;
+const RENEWAL_KEY = `agk_${'d'.repeat(43)}`;
+let renewalKeyHash: string;
 
 beforeAll(async () => {
+  renewalKeyHash = await bcrypt.hash(RENEWAL_KEY, 4);
   app = buildApp();
   await app.ready();
 });
@@ -122,13 +135,19 @@ describe('POST /v1/agent/register — TTL', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const { expiresAt } = res.json();
+    const { agentId, agentKey, expiresAt } = res.json();
     const expiresMs = new Date(expiresAt).getTime();
     const ttlMs = expiresMs - before;
 
     // Should be close to 10 minutes (±1 s tolerance)
     expect(ttlMs).toBeGreaterThanOrEqual(9 * 60 * 1000);
     expect(ttlMs).toBeLessThanOrEqual(11 * 60 * 1000);
+    expect(agentKey).toMatch(/^agk_/);
+    expect(dbPairingCodes[agentId].credentialHash).not.toBe(agentKey);
+    expect(dbPairingCodes[agentId].credentialPrefix).toBe(agentKey.slice(0, 16));
+    await expect(bcrypt.compare(agentKey, dbPairingCodes[agentId].credentialHash)).resolves.toBe(
+      true,
+    );
   });
 });
 
@@ -144,14 +163,20 @@ describe('POST /v1/agent/register — per-agentId cooldown', () => {
       claimedByUserId: null,
       // expiresAt in the future, implying the code was just issued moments ago
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      codeIssuedAt: new Date(),
+      credentialHash: renewalKeyHash,
+      credentialPrefix: RENEWAL_KEY.slice(0, 16),
+      credentialExpiresAt: new Date(Date.now() + 60_000),
+      credentialVersion: 1,
+      credentialRevokedAt: null,
       createdAt: new Date(),
     };
 
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/register',
-      headers: WORKER_HEADERS,
-      payload: { agentId: 'ag_cool' },
+      headers: { 'x-agent-key': RENEWAL_KEY },
+      payload: {},
     });
 
     expect(res.statusCode).toBe(429);
@@ -167,14 +192,20 @@ describe('POST /v1/agent/register — per-agentId cooldown', () => {
       code: 'OLDCOOL1',
       claimedByUserId: null,
       expiresAt: new Date(Date.now() + 4 * 60 * 1000),
-      createdAt: new Date(sixMinutesAgo), // cooldown reads createdAt directly
+      codeIssuedAt: new Date(sixMinutesAgo),
+      credentialHash: renewalKeyHash,
+      credentialPrefix: RENEWAL_KEY.slice(0, 16),
+      credentialExpiresAt: new Date(Date.now() + 60_000),
+      credentialVersion: 1,
+      credentialRevokedAt: null,
+      createdAt: new Date(),
     };
 
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/register',
-      headers: WORKER_HEADERS,
-      payload: { agentId: 'ag_cool2' },
+      headers: { 'x-agent-key': RENEWAL_KEY },
+      payload: {},
     });
 
     expect(res.statusCode).toBe(200);
@@ -190,14 +221,20 @@ describe('POST /v1/agent/register — per-agentId cooldown', () => {
       code: 'CLMD1234',
       claimedByUserId: 'user-already',
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      codeIssuedAt: new Date(),
+      credentialHash: renewalKeyHash,
+      credentialPrefix: RENEWAL_KEY.slice(0, 16),
+      credentialExpiresAt: new Date(Date.now() + 60_000),
+      credentialVersion: 1,
+      credentialRevokedAt: null,
       createdAt: new Date(),
     };
 
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/register',
-      headers: WORKER_HEADERS,
-      payload: { agentId: 'ag_claimed2' },
+      headers: { 'x-agent-key': RENEWAL_KEY },
+      payload: {},
     });
 
     expect(res.statusCode).toBe(409);
