@@ -4,6 +4,10 @@ import {
   LedgerEntryType,
   PotStatus,
   ApprovalDecisionType,
+  CryptoNetwork,
+  CryptoPaymentStatus,
+  CryptoProtocol,
+  PaymentRail,
 } from '@/contracts';
 
 describe('Shared contracts — enums', () => {
@@ -55,6 +59,25 @@ describe('Shared contracts — enums', () => {
   it('ApprovalDecisionType has APPROVED, DENIED', () => {
     expect(Object.values(ApprovalDecisionType)).toContain('APPROVED');
     expect(Object.values(ApprovalDecisionType)).toContain('DENIED');
+  });
+
+  it('keeps payment rail, protocol, network, and execution status as separate enums', () => {
+    expect(Object.values(PaymentRail)).toEqual(expect.arrayContaining(['CARD', 'CRYPTO']));
+    expect(Object.values(CryptoProtocol)).toEqual(['X402']);
+    expect(Object.values(CryptoNetwork)).toEqual(['BASE_SEPOLIA']);
+    expect(Object.values(CryptoPaymentStatus)).toEqual(
+      expect.arrayContaining([
+        'AWAITING_APPROVAL',
+        'PREPARED',
+        'SUBMISSION_UNKNOWN',
+        'RECONCILING',
+        'SUCCEEDED',
+        'FAILED_PRE_SUBMISSION',
+        'FAILED_ONCHAIN',
+        'DENIED',
+        'EXPIRED',
+      ]),
+    );
   });
 });
 

@@ -49,6 +49,50 @@ enum PaymentProvider {
   STRIPE
 }
 
+enum PaymentRail {
+  CARD
+  CRYPTO
+}
+
+enum CryptoProtocol {
+  X402
+}
+
+enum CryptoNetwork {
+  BASE_SEPOLIA
+}
+
+enum CryptoWalletStatus {
+  PROVISIONING
+  ACTIVE
+  SUSPENDED
+  FAILED
+  CLOSED
+}
+
+enum CryptoPermissionStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+  EXPIRED
+  INVALID
+}
+
+enum CryptoPaymentStatus {
+  AWAITING_APPROVAL
+  PREPARED
+  EXECUTING
+  SUBMITTED
+  SUBMISSION_UNKNOWN
+  CONFIRMING
+  RECONCILING
+  SUCCEEDED
+  FAILED_PRE_SUBMISSION
+  FAILED_ONCHAIN
+  DENIED
+  EXPIRED
+}
+
 model User {
   id                     String           @id @default(cuid())
   email                  String           @unique
@@ -70,6 +114,7 @@ model User {
   intents                PurchaseIntent[]
   ledgerEntries          LedgerEntry[]
   pots                   Pot[]
+  cryptoWalletAccounts   CryptoWalletAccount[]
 }
 
 model PairingCode {
@@ -88,6 +133,7 @@ model PurchaseIntent {
   subject          String?
   maxBudget        Int
   currency         String       @default("eur")
+  paymentRail      PaymentRail  @default(CARD)
   status           IntentStatus @default(RECEIVED)
   metadata         Json         @default("{}")
   idempotencyKey   String       @unique
@@ -101,6 +147,96 @@ model PurchaseIntent {
   pot              Pot?
   approvalDecision ApprovalDecision?
   auditEvents      AuditEvent[]
+  cryptoPayments   CryptoPayment[]
+}
+
+model CryptoWalletAccount {
+  id                  String             @id @default(cuid())
+  userId              String
+  network             CryptoNetwork
+  chainId             Int
+  customerAddress     String
+  customerAccountId   String?
+  executorAddress     String
+  executorAccountId   String             @unique
+  executorAccountName String             @unique
+  status              CryptoWalletStatus @default(PROVISIONING)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  user             User                    @relation(fields: [userId], references: [id])
+  spendPermissions CryptoSpendPermission[]
+  cryptoPayments   CryptoPayment[]
+
+  @@unique([userId, network])
+  @@unique([network, customerAddress])
+  @@unique([network, executorAddress])
+  @@index([status])
+}
+
+model CryptoSpendPermission {
+  id              String                 @id @default(cuid())
+  walletAccountId String
+  permissionHash  String                 @unique
+  network         CryptoNetwork
+  chainId         Int
+  customerAddress String
+  spenderAddress  String
+  tokenAddress    String
+  assetSymbol     String
+  tokenDecimals   Int
+  allowanceAtomic Decimal                @db.Decimal(78, 0)
+  periodSeconds   Int
+  validAfter      DateTime
+  validUntil      DateTime
+  status          CryptoPermissionStatus @default(PENDING)
+  revokedAt       DateTime?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  walletAccount  CryptoWalletAccount @relation(fields: [walletAccountId], references: [id])
+  cryptoPayments CryptoPayment[]
+
+  @@index([walletAccountId, status])
+  @@index([validUntil])
+}
+
+model CryptoPayment {
+  id                      String              @id @default(cuid())
+  intentId                String
+  walletAccountId         String
+  spendPermissionId       String
+  protocol                CryptoProtocol      @default(X402)
+  network                 CryptoNetwork
+  chainId                 Int
+  displayCurrency         String
+  displayAmount           Decimal?            @db.Decimal(36, 18)
+  assetSymbol             String
+  tokenAddress            String
+  tokenDecimals           Int
+  amountAtomic            Decimal             @db.Decimal(78, 0)
+  recipientAddress        String
+  requestDigest           String              @unique
+  executionIdempotencyKey String              @unique
+  transactionHash         String?             @unique
+  userOperationHash       String?             @unique
+  status                  CryptoPaymentStatus @default(AWAITING_APPROVAL)
+  submittedAt             DateTime?
+  confirmedAt             DateTime?
+  failedAt                DateTime?
+  reconciliationStartedAt DateTime?
+  reconciledAt            DateTime?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  intent          PurchaseIntent        @relation(fields: [intentId], references: [id])
+  walletAccount   CryptoWalletAccount   @relation(fields: [walletAccountId], references: [id])
+  spendPermission CryptoSpendPermission @relation(fields: [spendPermissionId], references: [id])
+
+  @@index([intentId])
+  @@index([status, updatedAt])
+  @@index([spendPermissionId])
 }
 
 model VirtualCard {

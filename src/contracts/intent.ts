@@ -1,10 +1,12 @@
 import {
   IntentStatus as PrismaIntentStatus,
   CardCancelPolicy as PrismaCardCancelPolicy,
+  PaymentRail as PrismaPaymentRail,
 } from '@prisma/client';
 
 export { PrismaIntentStatus as IntentStatus };
 export { PrismaCardCancelPolicy as CardCancelPolicy };
+export { PrismaPaymentRail as PaymentRail };
 
 export enum IntentEvent {
   INTENT_CREATED = 'INTENT_CREATED',
@@ -26,6 +28,7 @@ export interface PurchaseIntentData {
   subject: string | null;
   maxBudget: number;
   currency: string;
+  paymentRail: PrismaPaymentRail;
   status: PrismaIntentStatus;
   metadata: Record<string, unknown>;
   idempotencyKey: string;
