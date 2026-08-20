@@ -16,7 +16,7 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""
   },
   "dependencies": {
-    "@fastify/cors": "^11.2.0",
+    "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^11.2.0",
     "@prisma/client": "^5.14.0",
     "bcryptjs": "^3.0.3",
