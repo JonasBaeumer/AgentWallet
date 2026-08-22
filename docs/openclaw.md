@@ -1,5 +1,9 @@
 # OpenClaw — Agent Integration Guide
 
+> **Note:** MCP-capable agents should use the [MCP server](mcp.md) at `/mcp` instead of
+> driving these REST endpoints directly — same flow, same auth, discoverable tools.
+> This document remains the REST contract reference for non-MCP integrations.
+
 This document describes the HTTP API that OpenClaw (or any compatible agent) calls to
 request purchase approval and receive a one-time virtual card. Read this before writing
 any agent tool/plugin code.

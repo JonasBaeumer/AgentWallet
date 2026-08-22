@@ -441,9 +441,16 @@ curl http://localhost:3000/v1/debug/ledger/USER_ID
 
 ---
 
-## OpenClaw Agent Integration
+## Agent Integration (MCP)
 
-For the full agent integration guide — including registration, pairing, the decision polling loop, and the complete API contract — see [docs/openclaw.md](docs/openclaw.md).
+Agents integrate via the **MCP server** at `/mcp` (Streamable HTTP): seven tools covering
+registration, pairing, intent creation, quoting, approval polling, one-time card reveal,
+and result reporting, with the workflow rules delivered as server instructions during the
+MCP handshake. See [docs/mcp.md](docs/mcp.md) for client setup and the tool reference.
+
+For non-MCP integrations, the underlying REST contract — registration, pairing, the
+decision polling loop, and the complete API reference — is documented in
+[docs/openclaw.md](docs/openclaw.md).
 
 The key design principle: **OpenClaw never handles raw card credentials**. The decision endpoint returns exactly what the simulate endpoint needs:
 

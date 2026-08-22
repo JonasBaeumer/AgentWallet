@@ -1,0 +1,273 @@
+/**
+ * Unit tests for the MCP endpoint (/mcp, Streamable HTTP, stateless mode).
+ *
+ * The MCP tools delegate to the existing REST routes via app.inject(), so
+ * these tests focus on the transport wiring, auth, the tool catalogue, and
+ * that tool calls actually reach the underlying routes (mocked at the prisma
+ * layer, same pattern as the other API unit tests).
+ */
+
+jest.mock('@/config/env', () => ({
+  env: {
+    WORKER_API_KEY: 'test-worker-key',
+    PORT: 3000,
+    NODE_ENV: 'test',
+    STRIPE_SECRET_KEY: 'sk_test_placeholder',
+    STRIPE_WEBHOOK_SECRET: 'whsec_placeholder',
+    DATABASE_URL: 'postgresql://test',
+    REDIS_URL: 'redis://localhost:6379',
+    TELEGRAM_BOT_TOKEN: 'test-bot-token',
+    TELEGRAM_WEBHOOK_SECRET: 'test-webhook-secret',
+  },
+}));
+
+jest.mock('@/telegram/callbackHandler', () => ({
+  handleTelegramCallback: jest.fn().mockResolvedValue(undefined),
+}));
+jest.mock('@/payments/providers/stripe/stripeClient', () => ({
+  getStripeClient: () => ({ webhooks: { constructEvent: jest.fn() } }),
+}));
+jest.mock('@/orchestrator/intentService', () => ({
+  startSearching: jest.fn(),
+  receiveQuote: jest.fn(),
+  requestApproval: jest.fn(),
+  markCardIssued: jest.fn(),
+  startCheckout: jest.fn(),
+  completeCheckout: jest.fn(),
+  failCheckout: jest.fn(),
+  getIntentWithHistory: jest.fn(),
+}));
+jest.mock('@/queue/producers', () => ({
+  enqueueSearch: jest.fn(),
+  enqueueCheckout: jest.fn(),
+}));
+jest.mock('@/approval/approvalService', () => ({ recordDecision: jest.fn() }));
+jest.mock('@/ledger/potService', () => ({
+  reserveForIntent: jest.fn(),
+  settleIntent: jest.fn(),
+  returnIntent: jest.fn(),
+}));
+jest.mock('@/payments/providers/stripe/cardService', () => ({
+  issueVirtualCard: jest.fn(),
+  revealCard: jest.fn(),
+  cancelCard: jest.fn(),
+}));
+jest.mock('@/telegram/notificationService', () => ({
+  sendApprovalRequest: jest.fn().mockResolvedValue(undefined),
+}));
+
+const dbPairingCodes: Record<string, any> = {};
+
+jest.mock('@/db/client', () => ({
+  prisma: {
+    user: { findUnique: jest.fn().mockResolvedValue(null), update: jest.fn() },
+    purchaseIntent: {
+      create: jest.fn(),
+      findUnique: jest.fn().mockResolvedValue(null),
+      update: jest.fn(),
+    },
+    idempotencyRecord: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockResolvedValue({}),
+    },
+    auditEvent: { create: jest.fn().mockResolvedValue({}) },
+    pairingCode: {
+      findUnique: jest.fn(({ where }: any) =>
+        Promise.resolve(dbPairingCodes[where.agentId] ?? null),
+      ),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+  },
+}));
+
+import { buildApp } from '@/app';
+import type { FastifyInstance } from 'fastify';
+
+let app: FastifyInstance;
+
+const MCP_HEADERS = {
+  'content-type': 'application/json',
+  accept: 'application/json, text/event-stream',
+  'x-worker-key': 'test-worker-key',
+};
+
+/** POST a JSON-RPC message to /mcp and return the parsed JSON-RPC response. */
+async function mcpRequest(message: unknown, headers: Record<string, string> = {}) {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/mcp',
+    headers: { ...MCP_HEADERS, ...headers },
+    body: JSON.stringify(message),
+  });
+  return res;
+}
+
+function rpc(method: string, params: unknown = {}, id = 1) {
+  return { jsonrpc: '2.0', id, method, params };
+}
+
+function callTool(name: string, args: Record<string, unknown> = {}, id = 1) {
+  return rpc('tools/call', { name, arguments: args }, id);
+}
+
+beforeAll(async () => {
+  app = buildApp();
+  await app.ready();
+});
+
+afterAll(async () => {
+  await app.close();
+});
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  for (const key of Object.keys(dbPairingCodes)) delete dbPairingCodes[key];
+});
+
+// ─── Transport & auth ────────────────────────────────────────────────────────
+
+describe('POST /mcp — transport and auth', () => {
+  it('returns 401 without X-Worker-Key', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { 'content-type': 'application/json', accept: MCP_HEADERS.accept },
+      body: JSON.stringify(rpc('tools/list')),
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 401 with a wrong X-Worker-Key', async () => {
+    const res = await mcpRequest(rpc('tools/list'), { 'x-worker-key': 'wrong' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('completes the initialize handshake with server info and instructions', async () => {
+    const res = await mcpRequest(
+      rpc('initialize', {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'test-client', version: '0.0.1' },
+      }),
+    );
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.result.serverInfo.name).toBe('tranzact');
+    expect(body.result.instructions).toContain('one-time virtual card');
+    expect(body.result.capabilities.tools).toBeDefined();
+  });
+
+  it('rejects GET with 405 (stateless mode has no SSE stream)', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/mcp',
+      headers: { 'x-worker-key': 'test-worker-key', accept: MCP_HEADERS.accept },
+    });
+    expect(res.statusCode).toBe(405);
+  });
+
+  it('rejects DELETE with 405 (stateless mode has no session)', async () => {
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/mcp',
+      headers: { 'x-worker-key': 'test-worker-key', accept: MCP_HEADERS.accept },
+    });
+    expect(res.statusCode).toBe(405);
+  });
+});
+
+// ─── Tool catalogue ──────────────────────────────────────────────────────────
+
+describe('tools/list', () => {
+  it('advertises the full purchase-flow tool set', async () => {
+    const res = await mcpRequest(rpc('tools/list'));
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    const names = body.result.tools.map((t: any) => t.name).sort();
+    expect(names).toEqual([
+      'create_intent',
+      'get_decision',
+      'get_pairing_status',
+      'register_agent',
+      'report_result',
+      'reveal_card',
+      'submit_quote',
+    ]);
+  });
+
+  it('every tool has a description and an object input schema', async () => {
+    const res = await mcpRequest(rpc('tools/list'));
+    const body = JSON.parse(res.body);
+    for (const tool of body.result.tools) {
+      expect(tool.description.length).toBeGreaterThan(20);
+      expect(tool.inputSchema.type).toBe('object');
+    }
+  });
+});
+
+// ─── Tool calls (delegation to the REST routes) ──────────────────────────────
+
+describe('tools/call', () => {
+  it('get_pairing_status reports unclaimed for a registered but unpaired agent', async () => {
+    dbPairingCodes['ag_test1'] = { agentId: 'ag_test1', claimedByUserId: null };
+    const res = await mcpRequest(callTool('get_pairing_status', { agentId: 'ag_test1' }));
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBeFalsy();
+    expect(JSON.parse(body.result.content[0].text)).toEqual({ status: 'unclaimed' });
+  });
+
+  it('get_pairing_status reports claimed with the linked userId', async () => {
+    dbPairingCodes['ag_test2'] = { agentId: 'ag_test2', claimedByUserId: 'user-42' };
+    const res = await mcpRequest(callTool('get_pairing_status', { agentId: 'ag_test2' }));
+    const body = JSON.parse(res.body);
+    expect(JSON.parse(body.result.content[0].text)).toEqual({
+      status: 'claimed',
+      userId: 'user-42',
+    });
+  });
+
+  it('surfaces downstream HTTP errors as tool errors with the status code', async () => {
+    const res = await mcpRequest(callTool('get_pairing_status', { agentId: 'ag_missing' }));
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('HTTP 404');
+  });
+
+  it('get_decision returns 404 error result for an unknown intent', async () => {
+    const res = await mcpRequest(callTool('get_decision', { intentId: 'nope' }));
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('HTTP 404');
+  });
+
+  it('create_intent fails with guidance when no Authorization header is on the connection', async () => {
+    const res = await mcpRequest(
+      callTool('create_intent', { query: 'headphones', maxBudget: 500 }),
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('Authorization: Bearer');
+  });
+
+  it('rejects invalid tool arguments via zod before touching any route', async () => {
+    const res = await mcpRequest(
+      callTool('submit_quote', {
+        intentId: 'x',
+        merchantName: '',
+        merchantUrl: 'not-a-url',
+        price: -5,
+      }),
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('Invalid arguments for submit_quote');
+  });
+
+  it('returns an error result for an unknown tool', async () => {
+    const res = await mcpRequest(callTool('steal_card'));
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('Unknown tool');
+  });
+});
