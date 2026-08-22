@@ -130,7 +130,6 @@ challenge creates a new approval flow rather than mutating the approved record.
 | CDP API key ID and private key | AgentWallet operator | Deployment secret manager only | Rotate with overlapping keys, verify health, then revoke old key |
 | CDP wallet secret | AgentWallet operator | Deployment secret manager only | Generate a replacement in CDP, roll deployment, verify account access, revoke old secret |
 | Per-customer executor key | CDP wallet platform | Not exported or logged by AgentWallet | Recover through CDP account APIs; revoke Spend Permission if access is uncertain |
-| Vite CDP project ID | Frontend application | Public build-time configuration | Rotate projects/configuration; it is an identifier, not a secret |
 
 The CDP API key receives only permissions required to manage non-custodial backend
 accounts. Private-key export is prohibited. Secrets must be independently scoped by
@@ -149,6 +148,14 @@ migration is unrelated to the crypto rail and requires a separate compatibility
 change. Coinbase SDK imports are limited to the future crypto module described in
 #189 and #193; AgentKit is not installed until its restricted adapter in #198 has
 an immediate consumer.
+
+Only the CDP SDK root entry point is reachable today. The repository still uses the
+legacy `moduleResolution: "node"` algorithm, which ignores a package's `exports` map,
+and the SDK publishes `./auth` and `./x402` through `exports` alone. The root import
+resolves because the package also declares `main` and `types`; the subpaths do not.
+Moving to `node16` resolution first requires replacing the seven Stripe modules that
+import from `stripe/cjs/*`, which resolve only under the legacy algorithm. #214 tracks
+that migration and blocks the x402 execution work in #196.
 
 CDP SDK 1.55.0 pins an Axios release affected by published security advisories.
 The root package therefore overrides that transitive dependency to patched Axios
