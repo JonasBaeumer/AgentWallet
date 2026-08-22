@@ -1,8 +1,10 @@
 node_modules/
 dist/
 .env
+docker-compose.override.yml
 *.log
 coverage/
 .DS_Store
 .pnpm-store/
 **/.pnpm-store/
+.worktrees/
