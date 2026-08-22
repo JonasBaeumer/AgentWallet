@@ -130,6 +130,11 @@ challenge creates a new approval flow rather than mutating the approved record.
 | CDP API key ID and private key | AgentWallet operator | Deployment secret manager only | Rotate with overlapping keys, verify health, then revoke old key |
 | CDP wallet secret | AgentWallet operator | Deployment secret manager only | Generate a replacement in CDP, roll deployment, verify account access, revoke old secret |
 | Per-customer executor key | CDP wallet platform | Not exported or logged by AgentWallet | Recover through CDP account APIs; revoke Spend Permission if access is uncertain |
+| `VITE_CDP_PROJECT_ID` | Frontend application | Public build-time configuration | Rotate projects/configuration; it is an identifier, not a secret |
+
+No frontend exists in this repository yet; `VITE_CDP_PROJECT_ID` is recorded here so
+that the one CDP value safe to ship in a client build stays distinguishable from the
+backend credentials above, which must never carry a `VITE_` prefix.
 
 The CDP API key receives only permissions required to manage non-custodial backend
 accounts. Private-key export is prohibited. Secrets must be independently scoped by
