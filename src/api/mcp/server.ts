@@ -69,8 +69,10 @@ const getPairingStatusArgs = z.object({
 const createIntentArgs = z.object({
   query: z.string().min(1).max(500),
   subject: z.string().min(1).max(100).optional(),
-  maxBudget: z.number().int().positive(),
-  expiresAt: z.string().optional(),
+  // Mirror REST's createIntentSchema so the advertised contract never accepts
+  // a call the delegated route will 400.
+  maxBudget: z.number().int().positive().max(1000000),
+  expiresAt: z.string().datetime().optional(),
   idempotencyKey: z.string().min(8).max(128).optional(),
 });
 
@@ -183,10 +185,14 @@ const TOOLS = [
         maxBudget: {
           type: 'integer',
           minimum: 1,
-          description: 'Maximum spend in smallest currency unit (cents/pence)',
+          maximum: 1000000,
+          description:
+            'Maximum spend in smallest currency unit (cents/pence). Server ceiling: ' +
+            '1,000,000 (e.g. €10,000).',
         },
         expiresAt: {
           type: 'string',
+          format: 'date-time',
           description: 'Optional ISO 8601 datetime after which the intent expires',
         },
         idempotencyKey: {
@@ -241,7 +247,9 @@ const TOOLS = [
       'until the decision changes or the wait expires. Returns status AWAITING_APPROVAL ' +
       '(keep polling), DENIED (stop — do not check out), or APPROVED with ' +
       '{ checkout: { amount, currency } } — the amount is the spending limit on the card. ' +
-      'Call repeatedly while AWAITING_APPROVAL; the user decides in Telegram.',
+      'Any other status (e.g. EXPIRED, FAILED) also means stop: do not check out, report ' +
+      'the status to the user — only APPROVED continues the flow. Call repeatedly while ' +
+      'AWAITING_APPROVAL; the user decides in Telegram.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -373,13 +381,15 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
     },
 
     async create_intent(args) {
+      // Validate args before the credential check so schema errors surface
+      // even on a connection that has not configured the user key yet.
+      const { query, subject, maxBudget, expiresAt, idempotencyKey } = createIntentArgs.parse(args);
       if (!ctx.authorization) {
         return errorResult(
           'Missing user credentials: the MCP connection must send the user API key as an ' +
             '"Authorization: Bearer <key>" header (issued during Telegram signup).',
         );
       }
-      const { query, subject, maxBudget, expiresAt, idempotencyKey } = createIntentArgs.parse(args);
       const { statusCode, body } = await callApi({
         method: 'POST',
         url: '/v1/intents',

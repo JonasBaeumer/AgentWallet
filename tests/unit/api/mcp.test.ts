@@ -346,6 +346,44 @@ describe('tools/call — review regressions', () => {
     expect(prisma.purchaseIntent.create).not.toHaveBeenCalled();
   });
 
+  it('create_intent rejects maxBudget above the REST ceiling at the tool boundary', async () => {
+    // No auth header on purpose: schema validation must run before the credential check.
+    const res = await mcpRequest(
+      callTool('create_intent', { query: 'a yacht', maxBudget: 2_000_000 }),
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('Invalid arguments for create_intent');
+  });
+
+  it('advertised create_intent schema carries the maxBudget ceiling', async () => {
+    const res = await mcpRequest(rpc('tools/list'));
+    const body = JSON.parse(res.body);
+    const tool = body.result.tools.find((t: any) => t.name === 'create_intent');
+    expect(tool.inputSchema.properties.maxBudget.maximum).toBe(1000000);
+  });
+
+  it('get_decision passes non-approved statuses through and instructions define the stop rule', async () => {
+    (prisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValueOnce({
+      id: 'i-exp',
+      status: 'EXPIRED',
+    });
+    const res = await mcpRequest(callTool('get_decision', { intentId: 'i-exp' }));
+    const body = JSON.parse(res.body);
+    expect(body.result.content[0].text).toContain('EXPIRED');
+
+    const init = await mcpRequest(
+      rpc('initialize', {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'test-client', version: '0.0.1' },
+      }),
+    );
+    const instructions = JSON.parse(init.body).result.instructions;
+    expect(instructions).toContain('Any other');
+    expect(instructions).toContain('only APPROVED continues the flow');
+  });
+
   it('get_decision with waitSeconds shorter than the poll interval still rechecks', async () => {
     (prisma.purchaseIntent.findUnique as jest.Mock)
       .mockResolvedValueOnce({ id: 'i-wait', status: 'AWAITING_APPROVAL' })
