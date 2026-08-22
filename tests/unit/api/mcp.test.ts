@@ -291,6 +291,28 @@ describe('tools/call — review regressions', () => {
     expect(body.result.content[0].text).toContain('HTTP 404');
   });
 
+  it('report_result accepts an explicit actualAmount of 0 (fully discounted order)', async () => {
+    // Matches REST's nonnegative contract; validation passes and the route 404s.
+    const res = await mcpRequest(
+      callTool('report_result', { intentId: 'i-1', success: true, actualAmount: 0 }),
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.content[0].text).toContain('HTTP 404');
+  });
+
+  it('server instructions preserve the ten-minute approval timeout from the replaced skill', async () => {
+    const res = await mcpRequest(
+      rpc('initialize', {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'test-client', version: '0.0.1' },
+      }),
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.instructions).toContain('10 minutes');
+    expect(body.result.instructions).toContain('do not\n   keep polling indefinitely');
+  });
+
   it('create_intent forwards a caller-supplied idempotencyKey so retries return the original intent', async () => {
     const rawKey = 'testkey_0123456789abcdef';
     (prisma.user.findUnique as jest.Mock).mockImplementationOnce(({ where }: any) =>

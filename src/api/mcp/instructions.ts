@@ -31,7 +31,10 @@ report the result, which cancels the card.
    request to the user. Tell the user to approve or reject it in Telegram.
 4. \`get_decision\` — poll until the status is no longer AWAITING_APPROVAL. Pass
    \`waitSeconds\` (e.g. 20) so the server holds the request open instead of you
-   spinning. APPROVED → continue. DENIED → stop, do not check out.
+   spinning. APPROVED → continue. DENIED → stop, do not check out. If the status
+   is still AWAITING_APPROVAL after ~10 minutes of polling, stop: tell the user
+   the approval request timed out and that they can ask again to retry — do not
+   keep polling indefinitely.
 5. \`reveal_card\` — returns the virtual card credentials. THIS WORKS EXACTLY
    ONCE per intent. Hold the credentials in working memory only; never write
    them to disk, logs, or messages.

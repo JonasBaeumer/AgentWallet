@@ -80,6 +80,11 @@ and wake the agent via a system event. With MCP, call `get_decision` with
 decision every 2.5 s, so the agent makes ~3 calls per minute of waiting instead
 of 12. Agent frameworks with a yield/wake mechanism can still layer that on top.
 
+The server instructions preserve the previous integration's cutoff: after ~10
+minutes still in `AWAITING_APPROVAL`, the agent stops polling and tells the user
+the approval request timed out (intents without `expiresAt` are not expired
+server-side, so the client owns the cutoff).
+
 ---
 
 ## Design notes

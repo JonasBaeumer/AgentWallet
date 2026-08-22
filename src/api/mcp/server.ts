@@ -95,7 +95,9 @@ const reportResultArgs = z
   .object({
     intentId: z.string().min(1),
     success: z.boolean(),
-    actualAmount: z.number().int().positive().optional(),
+    // nonnegative, matching REST's agentResultSchema — an explicit 0 is a valid
+    // fully-discounted checkout; only OMITTING the amount on success is rejected.
+    actualAmount: z.number().int().nonnegative().optional(),
     receiptUrl: z.string().optional(),
     errorMessage: z.string().optional(),
   })
@@ -288,8 +290,10 @@ const TOOLS = [
         success: { type: 'boolean', description: 'Whether the merchant checkout completed' },
         actualAmount: {
           type: 'integer',
-          minimum: 1,
-          description: 'Amount actually charged, smallest currency unit. Required on success.',
+          minimum: 0,
+          description:
+            'Amount actually charged, smallest currency unit. Required on success; may be 0 ' +
+            'for a fully discounted order.',
         },
         receiptUrl: { type: 'string', description: 'Order confirmation URL, if available' },
         errorMessage: { type: 'string', description: 'Failure reason when success is false' },
