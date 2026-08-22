@@ -452,14 +452,24 @@ For non-MCP integrations, the underlying REST contract — registration, pairing
 decision polling loop, and the complete API reference — is documented in
 [docs/openclaw.md](docs/openclaw.md).
 
-The key design principle: **OpenClaw never handles raw card credentials**. The decision endpoint returns exactly what the simulate endpoint needs:
+Card credential handling depends on the checkout path:
 
-```
-GET  /v1/agent/decision/:intentId  →  { checkout: { intentId, amount, currency } }
-POST /v1/checkout/simulate         ←  { intentId, amount, currency, merchantName }
-```
+- **Simulated checkout** (`/v1/checkout/simulate`): the agent never sees card credentials.
+  The decision endpoint returns exactly what the simulate endpoint needs, and the server
+  resolves the Stripe card internally via the `intentId → VirtualCard → stripeCardId` lookup:
 
-The server resolves the Stripe card internally via the `intentId → VirtualCard → stripeCardId` lookup.
+  ```
+  GET  /v1/agent/decision/:intentId  →  { checkout: { intentId, amount, currency } }
+  POST /v1/checkout/simulate         ←  { intentId, amount, currency, merchantName }
+  ```
+
+- **Real merchant checkout** (`reveal_card` tool / `GET /v1/agent/card/:intentId`): the agent
+  receives the virtual card PAN and CVC **exactly once** to fill the merchant's payment form.
+  The card is single-use with a spending limit equal to the approved quote, credentials are
+  held in working memory only (never logged or persisted, per the server instructions), and
+  the card is cancelled when the result is reported. What stays hidden from the agent at all
+  times are the user's **real** bank and card details — the virtual card is the isolation
+  boundary.
 
 ---
 

@@ -54,12 +54,13 @@ function errorResult(text: string): ToolResult {
   return { content: [{ type: 'text', text }], isError: true };
 }
 
-// ---------------------------------------------------------------------------
-// Runtime validators (plain zod 3 — cheap types, same style as src/api/validators)
-// ---------------------------------------------------------------------------
+// Runtime validators — plain zod 3, same style as src/api/validators. Each must
+// mirror the constraints of the REST schema its tool delegates to.
 
 const registerAgentArgs = z.object({
-  agentId: z.string().optional(),
+  // min(1) mirrors REST; without it an explicit "" would fall through the
+  // truthiness check below and silently register a NEW agent instead of renewing.
+  agentId: z.string().min(1).optional(),
 });
 
 const getPairingStatusArgs = z.object({
@@ -100,7 +101,7 @@ const reportResultArgs = z
     // nonnegative, matching REST's agentResultSchema — an explicit 0 is a valid
     // fully-discounted checkout; only OMITTING the amount on success is rejected.
     actualAmount: z.number().int().nonnegative().optional(),
-    receiptUrl: z.string().optional(),
+    receiptUrl: z.string().url().optional(),
     errorMessage: z.string().optional(),
   })
   // Money invariant: a successful report without the charged amount would settle
@@ -116,10 +117,8 @@ const reportResultArgs = z
     }
   });
 
-// ---------------------------------------------------------------------------
 // Tool catalogue — JSON Schemas advertised to MCP clients. Kept literal and in
 // sync with the zod validators above so what is advertised is what is enforced.
-// ---------------------------------------------------------------------------
 
 const TOOLS = [
   {
@@ -135,6 +134,7 @@ const TOOLS = [
       properties: {
         agentId: {
           type: 'string',
+          minLength: 1,
           description: 'Existing agentId when renewing an expired pairing code; omit on first call',
         },
       },
@@ -303,7 +303,11 @@ const TOOLS = [
             'Amount actually charged, smallest currency unit. Required on success; may be 0 ' +
             'for a fully discounted order.',
         },
-        receiptUrl: { type: 'string', description: 'Order confirmation URL, if available' },
+        receiptUrl: {
+          type: 'string',
+          format: 'uri',
+          description: 'Order confirmation URL, if available',
+        },
         errorMessage: { type: 'string', description: 'Failure reason when success is false' },
       },
       required: ['intentId', 'success'],

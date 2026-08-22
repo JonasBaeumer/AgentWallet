@@ -346,6 +346,22 @@ describe('tools/call — review regressions', () => {
     expect(prisma.purchaseIntent.create).not.toHaveBeenCalled();
   });
 
+  it('report_result rejects a non-URL receiptUrl at the tool boundary (mirrors REST .url())', async () => {
+    const res = await mcpRequest(
+      callTool('report_result', { intentId: 'i-1', success: false, receiptUrl: 'order-123' }),
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('Invalid arguments for report_result');
+  });
+
+  it('register_agent rejects an explicit empty agentId instead of silently registering a new agent', async () => {
+    const res = await mcpRequest(callTool('register_agent', { agentId: '' }));
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('Invalid arguments for register_agent');
+  });
+
   it('create_intent rejects maxBudget above the REST ceiling at the tool boundary', async () => {
     // No auth header on purpose: schema validation must run before the credential check.
     const res = await mcpRequest(
