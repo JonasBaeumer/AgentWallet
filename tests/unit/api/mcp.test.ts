@@ -81,7 +81,9 @@ jest.mock('@/db/client', () => ({
   },
 }));
 
+import bcrypt from 'bcryptjs';
 import { buildApp } from '@/app';
+import { prisma } from '@/db/client';
 import type { FastifyInstance } from 'fastify';
 
 let app: FastifyInstance;
@@ -269,5 +271,67 @@ describe('tools/call', () => {
     const body = JSON.parse(res.body);
     expect(body.result.isError).toBe(true);
     expect(body.result.content[0].text).toContain('Unknown tool');
+  });
+});
+
+// ─── Regressions from Codex review round 1 ───────────────────────────────────
+
+describe('tools/call — review regressions', () => {
+  it('report_result rejects success:true without actualAmount (would settle 0 and refund the pot)', async () => {
+    const res = await mcpRequest(callTool('report_result', { intentId: 'i-1', success: true }));
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('actualAmount is required when success is true');
+  });
+
+  it('report_result still accepts success:false without actualAmount', async () => {
+    // Reaches the route and 404s on the unknown intent — validation passed.
+    const res = await mcpRequest(callTool('report_result', { intentId: 'i-1', success: false }));
+    const body = JSON.parse(res.body);
+    expect(body.result.content[0].text).toContain('HTTP 404');
+  });
+
+  it('create_intent forwards a caller-supplied idempotencyKey so retries return the original intent', async () => {
+    const rawKey = 'testkey_0123456789abcdef';
+    (prisma.user.findUnique as jest.Mock).mockImplementationOnce(({ where }: any) =>
+      Promise.resolve(
+        where?.apiKeyPrefix === rawKey.slice(0, 16)
+          ? {
+              id: 'user-1',
+              apiKeyPrefix: rawKey.slice(0, 16),
+              apiKeyHash: bcrypt.hashSync(rawKey, 4),
+              paymentProvider: 'STRIPE',
+            }
+          : null,
+      ),
+    );
+    const stored = { intentId: 'intent-original', status: 'SEARCHING' };
+    (prisma.idempotencyRecord.findUnique as jest.Mock).mockImplementationOnce(({ where }: any) =>
+      Promise.resolve(where?.key === 'stable-retry-key-1' ? { responseBody: stored } : null),
+    );
+
+    const res = await mcpRequest(
+      callTool('create_intent', {
+        query: 'headphones',
+        maxBudget: 500,
+        idempotencyKey: 'stable-retry-key-1',
+      }),
+      { authorization: `Bearer ${rawKey}` },
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBeFalsy();
+    expect(JSON.parse(body.result.content[0].text)).toEqual(stored);
+    expect(prisma.purchaseIntent.create).not.toHaveBeenCalled();
+  });
+
+  it('get_decision with waitSeconds shorter than the poll interval still rechecks', async () => {
+    (prisma.purchaseIntent.findUnique as jest.Mock)
+      .mockResolvedValueOnce({ id: 'i-wait', status: 'AWAITING_APPROVAL' })
+      .mockResolvedValueOnce({ id: 'i-wait', status: 'DENIED' });
+
+    const res = await mcpRequest(callTool('get_decision', { intentId: 'i-wait', waitSeconds: 1 }));
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBeFalsy();
+    expect(body.result.content[0].text).toContain('DENIED');
   });
 });

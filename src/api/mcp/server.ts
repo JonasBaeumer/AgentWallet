@@ -71,6 +71,7 @@ const createIntentArgs = z.object({
   subject: z.string().min(1).max(100).optional(),
   maxBudget: z.number().int().positive(),
   expiresAt: z.string().optional(),
+  idempotencyKey: z.string().min(8).max(128).optional(),
 });
 
 const submitQuoteArgs = z.object({
@@ -90,13 +91,26 @@ const revealCardArgs = z.object({
   intentId: z.string().min(1),
 });
 
-const reportResultArgs = z.object({
-  intentId: z.string().min(1),
-  success: z.boolean(),
-  actualAmount: z.number().int().positive().optional(),
-  receiptUrl: z.string().optional(),
-  errorMessage: z.string().optional(),
-});
+const reportResultArgs = z
+  .object({
+    intentId: z.string().min(1),
+    success: z.boolean(),
+    actualAmount: z.number().int().positive().optional(),
+    receiptUrl: z.string().optional(),
+    errorMessage: z.string().optional(),
+  })
+  // Money invariant: a successful report without the charged amount would settle
+  // the ledger at 0 and refund the whole reserved pot while marking the intent
+  // DONE. Reject it here — the REST validator accepts it (pre-existing).
+  .superRefine((val, ctx) => {
+    if (val.success && val.actualAmount === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['actualAmount'],
+        message: 'actualAmount is required when success is true',
+      });
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // Tool catalogue — JSON Schemas advertised to MCP clients. Kept literal and in
@@ -172,6 +186,16 @@ const TOOLS = [
         expiresAt: {
           type: 'string',
           description: 'Optional ISO 8601 datetime after which the intent expires',
+        },
+        idempotencyKey: {
+          type: 'string',
+          minLength: 8,
+          maxLength: 128,
+          description:
+            'Stable retry key. When retrying THIS EXACT request after a lost or failed ' +
+            'response, reuse the SAME key so the server returns the original intent instead ' +
+            'of creating a duplicate. Use a fresh key for each new purchase. Auto-generated ' +
+            'when omitted (in which case retries are NOT deduplicated).',
         },
       },
       required: ['query', 'maxBudget'],
@@ -271,6 +295,13 @@ const TOOLS = [
         errorMessage: { type: 'string', description: 'Failure reason when success is false' },
       },
       required: ['intentId', 'success'],
+      // actualAmount is mandatory on success — see the reportResultArgs refinement.
+      allOf: [
+        {
+          if: { properties: { success: { const: true } }, required: ['success'] },
+          then: { required: ['actualAmount'] },
+        },
+      ],
       additionalProperties: false,
     },
   },
@@ -344,13 +375,15 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
             '"Authorization: Bearer <key>" header (issued during Telegram signup).',
         );
       }
-      const { query, subject, maxBudget, expiresAt } = createIntentArgs.parse(args);
+      const { query, subject, maxBudget, expiresAt, idempotencyKey } = createIntentArgs.parse(args);
       const { statusCode, body } = await callApi({
         method: 'POST',
         url: '/v1/intents',
         headers: {
           authorization: ctx.authorization,
-          'x-idempotency-key': randomUUID(),
+          // Caller-supplied key survives MCP-level retries and hits the
+          // idempotency cache; a generated one is unique per execution.
+          'x-idempotency-key': idempotencyKey ?? randomUUID(),
         },
         payload: { query, subject, maxBudget, expiresAt },
       });
@@ -376,9 +409,11 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
       while (
         res.statusCode === 200 &&
         res.body.includes('AWAITING_APPROVAL') &&
-        Date.now() + DECISION_POLL_INTERVAL_MS <= deadline
+        Date.now() < deadline
       ) {
-        await sleep(DECISION_POLL_INTERVAL_MS);
+        // Sleep the remaining wait when it is shorter than the poll interval,
+        // so waits below 2.5s still get a recheck instead of returning early.
+        await sleep(Math.min(DECISION_POLL_INTERVAL_MS, Math.max(deadline - Date.now(), 1)));
         res = await callApi({ method: 'GET', url });
       }
       return toResult(res.statusCode, res.body);

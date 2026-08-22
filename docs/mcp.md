@@ -62,7 +62,7 @@ rate limits, idempotency, and audit logging are identical to REST.
 |---|---|---|
 | `register_agent` | `POST /v1/agent/register` | One-time; returns `agentId` + Telegram `pairingCode`. Rate limit 3/10 min |
 | `get_pairing_status` | `GET /v1/agent/user` | `unclaimed` → `claimed` once the user pairs |
-| `create_intent` | `POST /v1/intents` | Uses the connection's `Authorization` header; idempotency key auto-generated per call |
+| `create_intent` | `POST /v1/intents` | Uses the connection's `Authorization` header. Pass `idempotencyKey` and reuse it when retrying the same request after a lost response — the server then returns the original intent instead of creating a duplicate. Auto-generated when omitted (no retry dedup) |
 | `submit_quote` | `POST /v1/agent/quote` | Triggers the Telegram approval request |
 | `get_decision` | `GET /v1/agent/decision/:intentId` | Optional `waitSeconds` (max 25) server-side long-poll replaces the old client polling script |
 | `reveal_card` | `GET /v1/agent/card/:intentId` | **One-time reveal**; 429 does not consume it. Rate limit 2/min per intent |
