@@ -6,7 +6,8 @@
  */
 export const SERVER_INSTRUCTIONS = `Tranzact is a payment backend for agent-driven purchases. The user approves every
 purchase via Telegram before any charge occurs. On approval the backend issues a
-one-time virtual card with a spending limit equal to the approved quote; you reveal
+one-time virtual card with a spending limit equal to the intent's maxBudget (the
+approved budget — the quoted price may be lower); you reveal
 the card credentials exactly once, use them to check out on the merchant site, then
 report the result, which cancels the card.
 

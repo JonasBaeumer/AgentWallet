@@ -444,9 +444,12 @@ describe('tools/call — review regressions', () => {
     // Runtime validators require these; the catalogue must advertise them so
     // schema-driven clients cannot generate calls the boundary then rejects.
     const res = await mcpRequest(rpc('tools/list'));
-    const tools = JSON.parse(res.body).result.tools;
+    const tools: Array<{
+      name: string;
+      inputSchema: { properties: Record<string, Record<string, unknown>> };
+    }> = JSON.parse(res.body).result.tools;
     const prop = (tool: string, name: string) =>
-      tools.find((t: any) => t.name === tool).inputSchema.properties[name];
+      tools.find((t) => t.name === tool)!.inputSchema.properties[name];
     expect(prop('submit_quote', 'currency')).toMatchObject({ minLength: 3, maxLength: 3 });
     expect(prop('submit_quote', 'merchantName').minLength).toBe(1);
     expect(prop('get_pairing_status', 'agentId').minLength).toBe(1);

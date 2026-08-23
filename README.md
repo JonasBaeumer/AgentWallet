@@ -465,7 +465,8 @@ Card credential handling depends on the checkout path:
 
 - **Real merchant checkout** (`reveal_card` tool / `GET /v1/agent/card/:intentId`): the agent
   receives the virtual card PAN and CVC **exactly once** to fill the merchant's payment form.
-  The card is single-use with a spending limit equal to the approved quote, credentials are
+  The card is single-use with a spending limit equal to the intent's `maxBudget` (the
+  approved budget — the quoted price may be lower), credentials are
   held in working memory only (never logged or persisted, per the server instructions), and
   the card is cancelled when the result is reported. What stays hidden from the agent at all
   times are the user's **real** bank and card details — the virtual card is the isolation
