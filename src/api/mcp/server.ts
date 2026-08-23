@@ -218,7 +218,11 @@ const TOOLS = [
         expiresAt: {
           type: 'string',
           format: 'date-time',
-          description: 'Optional ISO 8601 datetime after which the intent expires',
+          // Mirrors REST's z.string().datetime(): UTC form only, no offsets.
+          pattern: 'Z$',
+          description:
+            'Optional ISO 8601 UTC datetime ending in Z after which the intent expires ' +
+            '(offsets such as +01:00 are rejected)',
         },
         idempotencyKey: {
           type: 'string',

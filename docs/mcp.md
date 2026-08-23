@@ -57,7 +57,11 @@ without extra prompt engineering.
 
 The seven tools map 1:1 onto the agent purchase flow. Every call delegates
 internally to the corresponding REST route, so validation, state-machine rules,
-rate limits, idempotency, and audit logging are identical to REST.
+rate limits, idempotency, and audit logging are identical to REST. The MCP
+boundary additionally validates arguments before delegating and is stricter in
+two places: unknown argument properties are rejected (`additionalProperties:
+false`; the REST schemas strip them), and `report_result` requires
+`actualAmount` when `success` is true (REST permits omitting it).
 
 | Tool | Wraps | Notes |
 |---|---|---|

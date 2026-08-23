@@ -475,6 +475,9 @@ describe('tools/call — review regressions', () => {
     for (const tool of ['submit_quote', 'get_decision', 'reveal_card', 'report_result']) {
       expect(prop(tool, 'intentId').minLength).toBe(1);
     }
+    // Runtime z.string().datetime() is UTC-only (no offsets); format: "date-time"
+    // alone would advertise RFC 3339 offsets the boundary then rejects.
+    expect(prop('create_intent', 'expiresAt').pattern).toBe('Z$');
   });
 
   it('rejects undeclared tool arguments instead of silently stripping them', async () => {
