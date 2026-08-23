@@ -431,13 +431,32 @@ describe('tools/call — review regressions', () => {
 
   it('get_decision with waitSeconds shorter than the poll interval still rechecks', async () => {
     (prisma.purchaseIntent.findUnique as jest.Mock)
-      .mockResolvedValueOnce({ id: 'i-wait', status: 'AWAITING_APPROVAL' })
-      .mockResolvedValueOnce({ id: 'i-wait', status: 'DENIED' });
+      .mockResolvedValueOnce({ id: 'i-wait', status: 'AWAITING_APPROVAL' }) // initial route call
+      .mockResolvedValueOnce({ status: 'DENIED' }) // DB status probe
+      .mockResolvedValueOnce({ id: 'i-wait', status: 'DENIED' }); // authoritative route call
 
     const res = await mcpRequest(callTool('get_decision', { intentId: 'i-wait', waitSeconds: 1 }));
     const body = JSON.parse(res.body);
     expect(body.result.isError).toBeFalsy();
     expect(body.result.content[0].text).toContain('DENIED');
+  });
+
+  it('get_decision rechecks probe the DB, not the rate-limited routes', async () => {
+    // Every injected request traverses the global 60/min-per-IP limiter, so the
+    // long-poll must not re-inject the route per 2.5s recheck — only the initial
+    // call and the final authoritative one may hit the HTTP layer.
+    (prisma.purchaseIntent.findUnique as jest.Mock)
+      .mockResolvedValueOnce({ id: 'i-rl', status: 'AWAITING_APPROVAL' })
+      .mockResolvedValueOnce({ status: 'DENIED' })
+      .mockResolvedValueOnce({ id: 'i-rl', status: 'DENIED' });
+
+    const res = await mcpRequest(callTool('get_decision', { intentId: 'i-rl', waitSeconds: 1 }));
+    expect(JSON.parse(res.body).result.content[0].text).toContain('DENIED');
+
+    const calls = (prisma.purchaseIntent.findUnique as jest.Mock).mock.calls;
+    expect(calls).toHaveLength(3);
+    // The middle lookup is the lightweight status probe, not a route traversal.
+    expect(calls[1][0]).toEqual({ where: { id: 'i-rl' }, select: { status: true } });
   });
 
   it('advertised schemas carry the runtime string bounds', async () => {

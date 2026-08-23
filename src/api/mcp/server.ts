@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { z } from 'zod';
 import { FastifyInstance } from 'fastify';
 import { env } from '@/config/env';
+import { prisma } from '@/db/client';
 import { SERVER_INSTRUCTIONS } from './instructions';
 
 /**
@@ -240,8 +241,10 @@ const TOOLS = [
     description:
       'Submit the product you found. Transitions the intent to AWAITING_APPROVAL and sends ' +
       'the user a Telegram approval request. price is an integer in the smallest currency ' +
-      'unit and must be within the intent budget. Returns 409 if the intent is not in ' +
-      'SEARCHING state. Do not submit a second quote for the same intent.',
+      'unit; keep it within the intent budget — the server does not reject an over-budget ' +
+      "quote, but the issued card is capped at the intent's maxBudget, so checkout at a " +
+      'higher price will fail. Returns 409 if the intent is not in SEARCHING state. Do not ' +
+      'submit a second quote for the same intent.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -467,6 +470,15 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
       const deadline = Date.now() + Math.min(waitSeconds ?? 0, MAX_WAIT_SECONDS) * 1000;
 
       let res = await callApi({ method: 'GET', url });
+      // Rechecks read the intent status straight from the DB instead of
+      // re-injecting the route: every injected request traverses the global
+      // 60/min-per-IP rate limiter under the forwarded client IP, so a 20s wait
+      // would otherwise burn ~9 requests of the caller's public quota per tool
+      // call. The route stays the single source of truth for the response —
+      // once the status leaves the waiting states we inject exactly once more
+      // for the authoritative payload. APPROVED counts as still-waiting, same
+      // as the route's own mapping of the brief pre-card transition.
+      const waitingStates = ['AWAITING_APPROVAL', 'APPROVED'];
       while (
         res.statusCode === 200 &&
         res.body.includes('AWAITING_APPROVAL') &&
@@ -475,6 +487,11 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
         // Sleep the remaining wait when it is shorter than the poll interval,
         // so waits below 2.5s still get a recheck instead of returning early.
         await sleep(Math.min(DECISION_POLL_INTERVAL_MS, Math.max(deadline - Date.now(), 1)));
+        const intent = await prisma.purchaseIntent.findUnique({
+          where: { id: intentId },
+          select: { status: true },
+        });
+        if (intent && waitingStates.includes(intent.status)) continue; // still pending — no route hit
         res = await callApi({ method: 'GET', url });
       }
       return toResult(res.statusCode, res.body);
