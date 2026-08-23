@@ -61,42 +61,57 @@ function errorResult(text: string): ToolResult {
 // Runtime validators — plain zod 3, same style as src/api/validators. Each must
 // mirror the constraints of the REST schema its tool delegates to.
 
-const registerAgentArgs = z.object({
-  // min(1) mirrors REST; without it an explicit "" would fall through the
-  // truthiness check below and silently register a NEW agent instead of renewing.
-  agentId: z.string().min(1).optional(),
-});
+const registerAgentArgs = z
+  .object({
+    // min(1) mirrors REST; without it an explicit "" would fall through the
+    // truthiness check below and silently register a NEW agent instead of renewing.
+    agentId: z.string().min(1).optional(),
+  })
+  // .strict() on every validator: the advertised schemas declare
+  // additionalProperties: false, so unknown keys must be an error, not silently
+  // stripped (a misspelled idempotency_key would otherwise lose deduplication).
+  .strict();
 
-const getPairingStatusArgs = z.object({
-  agentId: z.string().min(1),
-});
+const getPairingStatusArgs = z
+  .object({
+    agentId: z.string().min(1),
+  })
+  .strict();
 
-const createIntentArgs = z.object({
-  query: z.string().min(1).max(500),
-  subject: z.string().min(1).max(100).optional(),
-  // Mirror REST's createIntentSchema so the advertised contract never accepts
-  // a call the delegated route will 400.
-  maxBudget: z.number().int().positive().max(1000000),
-  expiresAt: z.string().datetime().optional(),
-  idempotencyKey: z.string().min(8).max(128).optional(),
-});
+const createIntentArgs = z
+  .object({
+    query: z.string().min(1).max(500),
+    subject: z.string().min(1).max(100).optional(),
+    // Mirror REST's createIntentSchema so the advertised contract never accepts
+    // a call the delegated route will 400.
+    maxBudget: z.number().int().positive().max(1000000),
+    expiresAt: z.string().datetime().optional(),
+    idempotencyKey: z.string().min(8).max(128).optional(),
+  })
+  .strict();
 
-const submitQuoteArgs = z.object({
-  intentId: z.string().min(1),
-  merchantName: z.string().min(1),
-  merchantUrl: z.string().url(),
-  price: z.number().int().positive(),
-  currency: z.string().length(3).optional(),
-});
+const submitQuoteArgs = z
+  .object({
+    intentId: z.string().min(1),
+    merchantName: z.string().min(1),
+    merchantUrl: z.string().url(),
+    price: z.number().int().positive(),
+    currency: z.string().length(3).optional(),
+  })
+  .strict();
 
-const getDecisionArgs = z.object({
-  intentId: z.string().min(1),
-  waitSeconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional(),
-});
+const getDecisionArgs = z
+  .object({
+    intentId: z.string().min(1),
+    waitSeconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional(),
+  })
+  .strict();
 
-const revealCardArgs = z.object({
-  intentId: z.string().min(1),
-});
+const revealCardArgs = z
+  .object({
+    intentId: z.string().min(1),
+  })
+  .strict();
 
 const reportResultArgs = z
   .object({
@@ -108,6 +123,7 @@ const reportResultArgs = z
     receiptUrl: z.string().url().optional(),
     errorMessage: z.string().optional(),
   })
+  .strict()
   // Money invariant: a successful report without the charged amount would settle
   // the ledger at 0 and refund the whole reserved pot while marking the intent
   // DONE. Reject it here — the REST validator accepts it (pre-existing).

@@ -439,4 +439,23 @@ describe('tools/call — review regressions', () => {
     expect(body.result.isError).toBeFalsy();
     expect(body.result.content[0].text).toContain('DENIED');
   });
+
+  it('rejects undeclared tool arguments instead of silently stripping them', async () => {
+    // A misspelled idempotency_key must error (advertised additionalProperties:
+    // false), not be dropped — dropping it silently loses retry deduplication.
+    const res = await mcpRequest(
+      callTool('create_intent', { query: 'usb hub', maxBudget: 500, idempotency_key: 'p-1' }),
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('Invalid arguments for create_intent');
+
+    // Same through the refined report_result chain (.strict() before .superRefine).
+    const res2 = await mcpRequest(
+      callTool('report_result', { intentId: 'i-1', success: false, actual_amount: 100 }),
+    );
+    const body2 = JSON.parse(res2.body);
+    expect(body2.result.isError).toBe(true);
+    expect(body2.result.content[0].text).toContain('Invalid arguments for report_result');
+  });
 });
