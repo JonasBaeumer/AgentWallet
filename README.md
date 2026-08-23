@@ -257,7 +257,7 @@ Every purchase is a `PurchaseIntent` tracked through an explicit state machine. 
 
 ### Prerequisites
 
-- **Node.js** 18+
+- **Node.js** 20+ (the MCP SDK's dependency tree requires `>=20`; CI runs Node 20)
 - **Docker** (for Postgres + Redis)
 - **Stripe account** with Issuing enabled — see [docs/stripe-setup.md](docs/stripe-setup.md) for the full walkthrough
 - **Telegram bot token** (optional) — for approval notifications and user signup; see [docs/telegram-setup.md](docs/telegram-setup.md)
