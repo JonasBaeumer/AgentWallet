@@ -458,7 +458,7 @@ Card credential handling depends on the checkout path:
   The decision endpoint returns exactly what the simulate endpoint needs, and the server
   resolves the Stripe card internally via the `intentId → VirtualCard → stripeCardId` lookup:
 
-  ```
+  ```text
   GET  /v1/agent/decision/:intentId  →  { checkout: { intentId, amount, currency } }
   POST /v1/checkout/simulate         ←  { intentId, amount, currency, merchantName }
   ```
@@ -599,7 +599,7 @@ Integration tests are skipped automatically when `STRIPE_SECRET_KEY` is not a `s
 
 | Concern | Mitigation |
 |---------|-----------|
-| Raw card PAN/CVC exposure | Never stored in DB or logs. `VirtualCard` holds only `stripeCardId` + `last4`. Agent receives only `intentId`. |
+| Raw card PAN/CVC exposure | Never stored in DB or logs. `VirtualCard` holds only `stripeCardId` + `last4`. The agent obtains PAN/CVC only through the one-time reveal (`reveal_card` / `GET /v1/agent/card/:intentId`), held in working memory and never logged or persisted; the simulated-checkout path exposes no credentials at all. |
 | Overspending | Stripe Issuing `spending_limits: [{ amount, interval: 'per_authorization' }]` enforced at the card network level. |
 | One-time card use | Card is cancelled immediately after checkout succeeds or fails. |
 | Double-spending | `revealedAt` prevents a second card reveal; `settleIntent` / `returnIntent` are idempotent. |

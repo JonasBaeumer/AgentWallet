@@ -227,7 +227,7 @@ const TOOLS = [
       properties: {
         intentId: { type: 'string', description: 'The intentId from create_intent' },
         merchantName: { type: 'string', description: 'Retailer display name, e.g. "Amazon UK"' },
-        merchantUrl: { type: 'string', description: 'Direct product URL' },
+        merchantUrl: { type: 'string', format: 'uri', description: 'Direct product URL' },
         price: {
           type: 'integer',
           minimum: 1,
