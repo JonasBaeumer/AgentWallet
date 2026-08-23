@@ -21,6 +21,7 @@ affinity required). Two credentials travel as HTTP headers on the connection:
 |---|---|---|
 | `X-Worker-Key` | `WORKER_API_KEY` | Required on every request; same shared secret as `/v1/agent/*` |
 | `Authorization` | `Bearer <user API key>` | The user's API key (issued during Telegram signup); required only for `create_intent` |
+| `X-Agent-Id` | agentId from `register_agent` | Optional; forwarded to every delegated route so audit events attribute actions to the agent. Add it to the connection config after registration |
 
 ### Claude Code
 

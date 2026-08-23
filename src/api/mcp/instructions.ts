@@ -18,6 +18,9 @@ report the result, which cancels the card.
    \`register_agent\` again with your stored \`agentId\` to get a fresh code.
 2. After the user says they have paired, call \`get_pairing_status\` with your
    \`agentId\`. Status \`claimed\` means you are ready to make purchases.
+3. If your MCP client configuration allows it, add your \`agentId\` as an
+   \`X-Agent-Id\` header on this connection — the backend then attributes
+   audit events for your quotes and checkout results to your agent.
 
 ## Purchase flow (in order, per purchase)
 

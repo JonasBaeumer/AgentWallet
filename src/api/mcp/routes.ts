@@ -21,9 +21,11 @@ export async function mcpRoutes(fastify: FastifyInstance): Promise<void> {
     '/mcp',
     { preHandler: workerAuthMiddleware },
     async (request: FastifyRequest, reply: FastifyReply) => {
+      const rawAgentId = request.headers['x-agent-id'];
       const server = buildMcpServer(fastify, {
         authorization: request.headers.authorization,
         clientIp: request.ip,
+        agentId: typeof rawAgentId === 'string' && rawAgentId.length > 0 ? rawAgentId : undefined,
       });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
@@ -38,7 +40,25 @@ export async function mcpRoutes(fastify: FastifyInstance): Promise<void> {
       await server.connect(transport);
       // Hand the raw response to the transport — fastify must not touch it again.
       reply.hijack();
-      await transport.handleRequest(request.raw, reply.raw, request.body);
+      try {
+        await transport.handleRequest(request.raw, reply.raw, request.body);
+      } catch (err) {
+        // After hijack() fastify cannot answer for us; without this the socket
+        // would hang open until the server timeout with no JSON-RPC error.
+        request.log.error({ err }, 'MCP transport failed after hijack');
+        if (!reply.raw.headersSent) {
+          reply.raw.writeHead(500, { 'content-type': 'application/json' });
+          reply.raw.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32603, message: 'Internal error' },
+              id: null,
+            }),
+          );
+        } else {
+          reply.raw.end();
+        }
+      }
     },
   );
 

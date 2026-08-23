@@ -13,6 +13,9 @@ import { SERVER_INSTRUCTIONS } from './instructions';
  *   forwarded verbatim to /v1/intents so user auth works exactly as on REST.
  * - `clientIp` — the real client IP, forwarded so per-IP rate limits
  *   (global 60/min, register 3/10min) key on the agent, not on loopback.
+ * - `agentId` — the connection's `X-Agent-Id` header, forwarded to every
+ *   delegated route so audit events attribute MCP-driven actions to the
+ *   registered agent (the replaced skill only sent it on /v1/agent/user).
  *
  * Note: the SDK's high-level McpServer/registerTool API is deliberately not used
  * here — its zod 3/4 compat types blow up tsc (TS2589, >25M instantiations).
@@ -22,6 +25,7 @@ import { SERVER_INSTRUCTIONS } from './instructions';
 export interface McpRequestContext {
   authorization?: string;
   clientIp?: string;
+  agentId?: string;
 }
 
 interface ApiCallOptions {
@@ -338,6 +342,9 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
   async function callApi(opts: ApiCallOptions): Promise<{ statusCode: number; body: string }> {
     const headers: Record<string, string> = {
       'x-worker-key': env.WORKER_API_KEY,
+      // Connection-level agent identity for audit attribution; a tool-level
+      // header (get_pairing_status) takes precedence via the spread below.
+      ...(ctx.agentId ? { 'x-agent-id': ctx.agentId } : {}),
       ...opts.headers,
     };
     if (opts.payload !== undefined) {
@@ -400,8 +407,14 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
         headers: {
           authorization: ctx.authorization,
           // Caller-supplied key survives MCP-level retries and hits the
-          // idempotency cache; a generated one is unique per execution.
-          'x-idempotency-key': idempotencyKey ?? randomUUID(),
+          // idempotency cache; a generated one is unique per execution. The
+          // key is namespaced by the bearer's non-secret 16-char prefix (the
+          // same apiKeyPrefix REST uses for rate-limit keys) so two users
+          // supplying the same key can never replay each other's response —
+          // the IdempotencyRecord lookup is global by key.
+          'x-idempotency-key': idempotencyKey
+            ? `${ctx.authorization.slice(7, 23)}:${idempotencyKey}`
+            : randomUUID(),
         },
         payload: { query, subject, maxBudget, expiresAt },
       });
@@ -461,7 +474,11 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const handler = handlers[name];
+    // Own-property check: a bare handlers[name] would resolve inherited
+    // Object.prototype members ("toString", "constructor") and invoke them.
+    const handler = Object.prototype.hasOwnProperty.call(handlers, name)
+      ? handlers[name]
+      : undefined;
     if (!handler) {
       return errorResult(`Unknown tool: ${name}`);
     }

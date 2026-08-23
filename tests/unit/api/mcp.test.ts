@@ -84,6 +84,7 @@ jest.mock('@/db/client', () => ({
 import bcrypt from 'bcryptjs';
 import { buildApp } from '@/app';
 import { prisma } from '@/db/client';
+import { completeCheckout } from '@/orchestrator/intentService';
 import type { FastifyInstance } from 'fastify';
 
 let app: FastifyInstance;
@@ -328,8 +329,12 @@ describe('tools/call — review regressions', () => {
       ),
     );
     const stored = { intentId: 'intent-original', status: 'SEARCHING' };
+    // The forwarded key is namespaced by the bearer's 16-char prefix so two
+    // users supplying the same caller key can never replay each other's intent.
     (prisma.idempotencyRecord.findUnique as jest.Mock).mockImplementationOnce(({ where }: any) =>
-      Promise.resolve(where?.key === 'stable-retry-key-1' ? { responseBody: stored } : null),
+      Promise.resolve(
+        where?.key === 'testkey_01234567:stable-retry-key-1' ? { responseBody: stored } : null,
+      ),
     );
 
     const res = await mcpRequest(
@@ -398,6 +403,30 @@ describe('tools/call — review regressions', () => {
     const instructions = JSON.parse(init.body).result.instructions;
     expect(instructions).toContain('Any other');
     expect(instructions).toContain('only APPROVED continues the flow');
+  });
+
+  it('forwards the connection X-Agent-Id to delegated routes for audit attribution', async () => {
+    (prisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValueOnce({
+      id: 'i-att',
+      status: 'CHECKOUT_RUNNING',
+      metadata: {},
+    });
+    const res = await mcpRequest(
+      callTool('report_result', { intentId: 'i-att', success: true, actualAmount: 100 }),
+      { 'x-agent-id': 'ag-conn-1' },
+    );
+    const body = JSON.parse(res.body);
+    expect(body.result.isError).toBeFalsy();
+    expect(completeCheckout).toHaveBeenCalledWith('i-att', 100, 'ag-conn-1');
+  });
+
+  it('tool dispatch does not resolve inherited Object.prototype members', async () => {
+    for (const name of ['toString', 'constructor', 'valueOf']) {
+      const res = await mcpRequest(callTool(name));
+      const body = JSON.parse(res.body);
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0].text).toContain(`Unknown tool: ${name}`);
+    }
   });
 
   it('get_decision with waitSeconds shorter than the poll interval still rechecks', async () => {
