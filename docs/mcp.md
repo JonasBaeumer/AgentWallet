@@ -73,6 +73,13 @@ Tool results carry the route's JSON response as text content. Non-2xx responses
 come back as tool errors prefixed with the HTTP status (e.g. `HTTP 409: {...}`),
 so state-conflict semantics stay visible to the agent.
 
+> **Do not run the stub worker alongside MCP agents.** `create_intent` (like
+> `POST /v1/intents`) enqueues a job on the internal `search-queue`; if
+> `npm run worker` is running, its stub processor immediately posts a fake
+> Amazon quote and triggers an approval request, so the MCP agent's own
+> `submit_quote` gets a `409`. Run the stub worker or a real MCP agent, not
+> both — the same warning the REST guide gives in `docs/openclaw.md`.
+
 ### Approval waiting
 
 The old skill launched a background Python script to poll for the user's decision
