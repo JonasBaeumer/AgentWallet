@@ -171,7 +171,11 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        agentId: { type: 'string', description: 'The agentId returned by register_agent' },
+        agentId: {
+          type: 'string',
+          minLength: 1,
+          description: 'The agentId returned by register_agent',
+        },
       },
       required: ['agentId'],
       additionalProperties: false,
@@ -241,8 +245,12 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        intentId: { type: 'string', description: 'The intentId from create_intent' },
-        merchantName: { type: 'string', description: 'Retailer display name, e.g. "Amazon UK"' },
+        intentId: { type: 'string', minLength: 1, description: 'The intentId from create_intent' },
+        merchantName: {
+          type: 'string',
+          minLength: 1,
+          description: 'Retailer display name, e.g. "Amazon UK"',
+        },
         merchantUrl: { type: 'string', format: 'uri', description: 'Direct product URL' },
         price: {
           type: 'integer',
@@ -251,6 +259,8 @@ const TOOLS = [
         },
         currency: {
           type: 'string',
+          minLength: 3,
+          maxLength: 3,
           description: '3-letter lowercase ISO code matching the intent currency, e.g. "eur"',
         },
       },
@@ -273,7 +283,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        intentId: { type: 'string', description: 'The intentId from create_intent' },
+        intentId: { type: 'string', minLength: 1, description: 'The intentId from create_intent' },
         waitSeconds: {
           type: 'integer',
           minimum: 0,
@@ -297,7 +307,11 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        intentId: { type: 'string', description: 'The intentId of an approved intent' },
+        intentId: {
+          type: 'string',
+          minLength: 1,
+          description: 'The intentId of an approved intent',
+        },
       },
       required: ['intentId'],
       additionalProperties: false,
@@ -314,7 +328,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        intentId: { type: 'string', description: 'The intentId from create_intent' },
+        intentId: { type: 'string', minLength: 1, description: 'The intentId from create_intent' },
         success: { type: 'boolean', description: 'Whether the merchant checkout completed' },
         actualAmount: {
           type: 'integer',

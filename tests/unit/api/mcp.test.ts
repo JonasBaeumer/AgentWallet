@@ -440,6 +440,21 @@ describe('tools/call — review regressions', () => {
     expect(body.result.content[0].text).toContain('DENIED');
   });
 
+  it('advertised schemas carry the runtime string bounds', async () => {
+    // Runtime validators require these; the catalogue must advertise them so
+    // schema-driven clients cannot generate calls the boundary then rejects.
+    const res = await mcpRequest(rpc('tools/list'));
+    const tools = JSON.parse(res.body).result.tools;
+    const prop = (tool: string, name: string) =>
+      tools.find((t: any) => t.name === tool).inputSchema.properties[name];
+    expect(prop('submit_quote', 'currency')).toMatchObject({ minLength: 3, maxLength: 3 });
+    expect(prop('submit_quote', 'merchantName').minLength).toBe(1);
+    expect(prop('get_pairing_status', 'agentId').minLength).toBe(1);
+    for (const tool of ['submit_quote', 'get_decision', 'reveal_card', 'report_result']) {
+      expect(prop(tool, 'intentId').minLength).toBe(1);
+    }
+  });
+
   it('rejects undeclared tool arguments instead of silently stripping them', async () => {
     // A misspelled idempotency_key must error (advertised additionalProperties:
     // false), not be dropped — dropping it silently loses retry deduplication.
