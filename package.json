@@ -2,6 +2,9 @@
   "name": "trustedpaymentinfrastructureforagents",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only -r tsconfig-paths/register src/server.ts",
     "worker": "ts-node -r tsconfig-paths/register src/worker/stubWorker.ts",
@@ -16,6 +19,7 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""
   },
   "dependencies": {
+    "@coinbase/cdp-sdk": "1.55.0",
     "@fastify/cors": "^11.2.0",
     "@fastify/rate-limit": "^11.2.0",
     "@prisma/client": "^5.14.0",
@@ -48,5 +52,10 @@
     "ts-node-dev": "^2.0.0",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.5.2"
+  },
+  "overrides": {
+    "@coinbase/cdp-sdk": {
+      "axios": "1.19.0"
+    }
   }
 }
