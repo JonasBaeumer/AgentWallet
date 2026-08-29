@@ -92,6 +92,14 @@ spend. The onchain permission and AgentWallet approval are both required.
 
 ## Rotation and compromise response
 
+The two backend credentials rotate differently, and conflating them produces the
+wrong runbook. The Secret API Key supports an overlap window: the replacement and
+the old key are both valid until you revoke the old one, so rotation needs no
+outage. The Wallet Secret has no overlap; rotating it invalidates the previous
+secret immediately, so rotation is a planned signing outage. The credential table
+in [ADR 001](architecture/001-coinbase-crypto-payment-rail.md) records the same
+split.
+
 Rotate the Secret API Key on its own where possible:
 
 1. Disable crypto payments and stop new payment submissions.
