@@ -9,3 +9,4 @@ export * from './services';
 export * from './agent';
 export * from './reconciliation';
 export * from './payment';
+export * from './crypto';
