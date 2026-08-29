@@ -3,8 +3,12 @@ name: CodeQL
 on:
   push:
     branches: [main]
+  # No branch filter: the Coinbase work lands as a stack of PRs based on each
+  # other rather than on main, and a `branches: [main]` filter here silently gave
+  # every one of them zero CI -- no lint, no type check, no tests -- until the
+  # base was retargeted. Running on every pull request costs nothing extra and
+  # keeps a stacked PR as well covered as a direct one.
   pull_request:
-    branches: [main]
   schedule:
     - cron: "0 3 * * 1"
 
