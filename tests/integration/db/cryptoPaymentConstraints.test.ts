@@ -363,3 +363,78 @@ describe('address canonicalization', () => {
     await prisma.user.delete({ where: { id: other.id } });
   });
 });
+
+// #192 made the executor columns nullable so a customer can bind a Smart Account
+// before #193 provisions an executor. validate_crypto_payment_scope() compares
+// the permission's spender against the wallet's executor, and that comparison is
+// NULL — not false — for an unprovisioned wallet, so the scope check alone would
+// let such a payment through.
+describe('unprovisioned executor', () => {
+  it('rejects a payment on a wallet that has no executor yet', async () => {
+    const user = await prisma.user.create({
+      data: { email: `crypto-no-executor-${Date.now()}@test.local` },
+    });
+    const wallet = await prisma.cryptoWalletAccount.create({
+      data: {
+        userId: user.id,
+        network: CryptoNetwork.BASE_SEPOLIA,
+        chainId: 84532,
+        customerAddress: `0x${'7'.repeat(40)}`,
+        status: 'ACTIVE',
+      },
+    });
+    const permission = await prisma.cryptoSpendPermission.create({
+      data: {
+        walletAccountId: wallet.id,
+        permissionHash: uniqueHex(),
+        network: CryptoNetwork.BASE_SEPOLIA,
+        chainId: 84532,
+        customerAddress: `0x${'7'.repeat(40)}`,
+        spenderAddress: `0x${'6'.repeat(40)}`,
+        tokenAddress: TOKEN,
+        assetSymbol: 'USDC',
+        tokenDecimals: 6,
+        allowanceAtomic: new Prisma.Decimal(ALLOWANCE),
+        periodSeconds: 86_400,
+        validAfter: new Date(Date.now() - 60_000),
+        validUntil: new Date(Date.now() + 86_400_000),
+        status: 'ACTIVE',
+      },
+    });
+    const intent = await prisma.purchaseIntent.create({
+      data: {
+        userId: user.id,
+        query: 'Pay before the executor exists',
+        maxBudget: 1000,
+        currency: 'usd',
+        paymentRail: PaymentRail.CRYPTO,
+        idempotencyKey: `no-executor-${Date.now()}`,
+      },
+    });
+
+    await expect(
+      prisma.cryptoPayment.create({
+        data: {
+          intentId: intent.id,
+          walletAccountId: wallet.id,
+          spendPermissionId: permission.id,
+          network: CryptoNetwork.BASE_SEPOLIA,
+          chainId: 84532,
+          displayCurrency: 'usd',
+          assetSymbol: 'USDC',
+          tokenAddress: TOKEN,
+          tokenDecimals: 6,
+          amountAtomic: new Prisma.Decimal('1250000'),
+          recipientAddress: RECIPIENT,
+          requestDigest: uniqueHex(),
+          executionIdempotencyKey: `no-executor-exec-${Date.now()}`,
+        },
+      }),
+    ).rejects.toThrow('crypto_payment_wallet_executor_missing');
+
+    await prisma.cryptoSpendPermission.delete({ where: { id: permission.id } });
+    await prisma.purchaseIntent.delete({ where: { id: intent.id } });
+    await prisma.cryptoWalletAccount.delete({ where: { id: wallet.id } });
+    await prisma.user.delete({ where: { id: user.id } });
+  });
+});

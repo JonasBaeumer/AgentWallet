@@ -159,11 +159,12 @@ model CryptoWalletAccount {
   network             CryptoNetwork
   chainId             Int
   customerAddress     String
-  customerAccountId   String?
-  executorAddress     String
-  executorAccountId   String             @unique
-  executorAccountName String             @unique
+  customerAccountId   String?            @unique
+  executorAddress     String?
+  executorAccountId   String?            @unique
+  executorAccountName String?            @unique
   status              CryptoWalletStatus @default(PROVISIONING)
+  disconnectedAt      DateTime?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 

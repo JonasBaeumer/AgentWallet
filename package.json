@@ -16,7 +16,11 @@
     "seed": "ts-node -r tsconfig-paths/register src/db/seed.ts",
     "lint": "eslint src tests --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\""
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "web:test": "npm --prefix web run test:e2e",
+    "web:test:secrets": "npm --prefix web run test:bundle-secrets"
   },
   "dependencies": {
     "@coinbase/cdp-sdk": "1.55.0",

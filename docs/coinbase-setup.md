@@ -76,8 +76,8 @@ values in a GitHub issue, pull request, fixture, snapshot, shell history, or log
 
 ## Customer prerequisites
 
-The crypto payment UI is not available yet. After the dependent issues land, a
-customer must complete these steps before an agent can pay:
+The customer completes these steps in the wallet setup application before an
+agent can pay:
 
 1. Sign in through the CDP user-wallet flow and provision a Smart Account on Base
    Sepolia.
@@ -86,6 +86,9 @@ customer must complete these steps before an agent can pay:
 3. Grant the dedicated AgentWallet executor a time-bounded USDC Spend Permission.
 4. Approve the immutable x402 recipient, asset, network, amount, and expiry shown by
    AgentWallet.
+
+See [Customer wallet onboarding](coinbase-wallet-onboarding.md) for the local
+application, CDP domain allowlist, and deployment requirements.
 
 Creating an account or adding credentials does not grant an agent permission to
 spend. The onchain permission and AgentWallet approval are both required.
