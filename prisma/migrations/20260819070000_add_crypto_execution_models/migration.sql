@@ -37,10 +37,10 @@ CREATE TABLE "CryptoWalletAccount" (
     "network" = 'BASE_SEPOLIA' AND "chainId" = 84532
   ),
   CONSTRAINT "crypto_wallet_customer_address" CHECK (
-    "customerAddress" ~ '^0x[0-9a-fA-F]{40}$'
+    "customerAddress" ~ '^0x[0-9a-f]{40}$'
   ),
   CONSTRAINT "crypto_wallet_executor_address" CHECK (
-    "executorAddress" ~ '^0x[0-9a-fA-F]{40}$'
+    "executorAddress" ~ '^0x[0-9a-f]{40}$'
   ),
   CONSTRAINT "crypto_wallet_executor_identifiers" CHECK (
     length("executorAccountId") > 0 AND length("executorAccountName") > 0
@@ -72,12 +72,12 @@ CREATE TABLE "CryptoSpendPermission" (
     "network" = 'BASE_SEPOLIA' AND "chainId" = 84532
   ),
   CONSTRAINT "crypto_permission_addresses" CHECK (
-    "customerAddress" ~ '^0x[0-9a-fA-F]{40}$' AND
-    "spenderAddress" ~ '^0x[0-9a-fA-F]{40}$' AND
-    "tokenAddress" ~ '^0x[0-9a-fA-F]{40}$'
+    "customerAddress" ~ '^0x[0-9a-f]{40}$' AND
+    "spenderAddress" ~ '^0x[0-9a-f]{40}$' AND
+    "tokenAddress" ~ '^0x[0-9a-f]{40}$'
   ),
   CONSTRAINT "crypto_permission_hash" CHECK (
-    "permissionHash" ~ '^0x[0-9a-fA-F]{64}$'
+    "permissionHash" ~ '^0x[0-9a-f]{64}$'
   ),
   CONSTRAINT "crypto_permission_amount" CHECK (
     "allowanceAtomic" > 0 AND "periodSeconds" > 0 AND
@@ -122,15 +122,15 @@ CREATE TABLE "CryptoPayment" (
     "network" = 'BASE_SEPOLIA' AND "chainId" = 84532
   ),
   CONSTRAINT "crypto_payment_addresses" CHECK (
-    "tokenAddress" ~ '^0x[0-9a-fA-F]{40}$' AND
-    "recipientAddress" ~ '^0x[0-9a-fA-F]{40}$'
+    "tokenAddress" ~ '^0x[0-9a-f]{40}$' AND
+    "recipientAddress" ~ '^0x[0-9a-f]{40}$'
   ),
   CONSTRAINT "crypto_payment_request_digest" CHECK (
-    "requestDigest" ~ '^0x[0-9a-fA-F]{64}$'
+    "requestDigest" ~ '^0x[0-9a-f]{64}$'
   ),
   CONSTRAINT "crypto_payment_hashes" CHECK (
-    ("transactionHash" IS NULL OR "transactionHash" ~ '^0x[0-9a-fA-F]{64}$') AND
-    ("userOperationHash" IS NULL OR "userOperationHash" ~ '^0x[0-9a-fA-F]{64}$')
+    ("transactionHash" IS NULL OR "transactionHash" ~ '^0x[0-9a-f]{64}$') AND
+    ("userOperationHash" IS NULL OR "userOperationHash" ~ '^0x[0-9a-f]{64}$')
   ),
   CONSTRAINT "crypto_payment_amount" CHECK (
     "amountAtomic" > 0 AND "tokenDecimals" BETWEEN 0 AND 255 AND
@@ -171,13 +171,18 @@ CREATE INDEX "CryptoPayment_status_updatedAt_idx" ON "CryptoPayment"("status", "
 CREATE INDEX "CryptoPayment_spendPermissionId_idx"
   ON "CryptoPayment"("spendPermissionId");
 
--- Terminal records remain as immutable history, while a failed/denied/expired
--- request can be replaced without allowing concurrent execution for one intent.
+-- One intent is one purchase. A request that failed, was denied, or expired moved
+-- no funds and may be replaced; SUCCEEDED did move funds, so it holds the slot
+-- permanently and a second payment against the same intent cannot be inserted.
+-- Terminal failures remain as immutable history either way.
+--
+-- Equivalently: every status except the four replaceable ones. Keep this list in
+-- step with enforce_crypto_payment_status_transition() below --
+-- tests/integration/db/cryptoTransitionParity.test.ts asserts they agree.
 CREATE UNIQUE INDEX "CryptoPayment_one_active_per_intent_key"
   ON "CryptoPayment"("intentId")
-  WHERE "status" IN (
-    'AWAITING_APPROVAL', 'PREPARED', 'EXECUTING', 'SUBMITTED',
-    'SUBMISSION_UNKNOWN', 'CONFIRMING', 'RECONCILING'
+  WHERE "status" NOT IN (
+    'FAILED_PRE_SUBMISSION', 'FAILED_ONCHAIN', 'DENIED', 'EXPIRED'
   );
 
 ALTER TABLE "CryptoWalletAccount"
@@ -253,6 +258,53 @@ CREATE TRIGGER "CryptoPayment_status_transition"
   BEFORE UPDATE OF "status" ON "CryptoPayment"
   FOR EACH ROW EXECUTE FUNCTION enforce_crypto_payment_status_transition();
 
+-- Canonicalize EVM addresses and hashes before the CHECK constraints above run.
+-- PostgreSQL evaluates BEFORE triggers first, so a checksummed address supplied
+-- by a caller is stored lowercase rather than rejected, and the plain TEXT
+-- uniqueness indexes cannot admit the same address twice in two casings.
+-- BEFORE triggers on one table fire in name order, so these run ahead of
+-- "CryptoPayment_scope".
+CREATE FUNCTION normalize_crypto_wallet_addresses() RETURNS trigger AS $$
+BEGIN
+  NEW."customerAddress" := lower(NEW."customerAddress");
+  NEW."executorAddress" := lower(NEW."executorAddress");
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "CryptoWalletAccount_normalize_addresses"
+  BEFORE INSERT OR UPDATE ON "CryptoWalletAccount"
+  FOR EACH ROW EXECUTE FUNCTION normalize_crypto_wallet_addresses();
+
+CREATE FUNCTION normalize_crypto_permission_addresses() RETURNS trigger AS $$
+BEGIN
+  NEW."customerAddress" := lower(NEW."customerAddress");
+  NEW."spenderAddress" := lower(NEW."spenderAddress");
+  NEW."tokenAddress" := lower(NEW."tokenAddress");
+  NEW."permissionHash" := lower(NEW."permissionHash");
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "CryptoSpendPermission_normalize_addresses"
+  BEFORE INSERT OR UPDATE ON "CryptoSpendPermission"
+  FOR EACH ROW EXECUTE FUNCTION normalize_crypto_permission_addresses();
+
+CREATE FUNCTION normalize_crypto_payment_addresses() RETURNS trigger AS $$
+BEGIN
+  NEW."tokenAddress" := lower(NEW."tokenAddress");
+  NEW."recipientAddress" := lower(NEW."recipientAddress");
+  NEW."requestDigest" := lower(NEW."requestDigest");
+  NEW."transactionHash" := lower(NEW."transactionHash");
+  NEW."userOperationHash" := lower(NEW."userOperationHash");
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "CryptoPayment_normalize_addresses"
+  BEFORE INSERT OR UPDATE ON "CryptoPayment"
+  FOR EACH ROW EXECUTE FUNCTION normalize_crypto_payment_addresses();
+
 -- Validate that every crypto record is scoped to the same customer wallet,
 -- permission, network, token, and rail before it can enter the lifecycle.
 CREATE FUNCTION validate_crypto_payment_scope() RETURNS trigger AS $$
@@ -272,18 +324,26 @@ DECLARE
   permission_token TEXT;
   permission_decimals INTEGER;
   permission_allowance DECIMAL(78,0);
+  permission_symbol TEXT;
+  permission_status "CryptoPermissionStatus";
+  permission_valid_after TIMESTAMP(3);
+  permission_valid_until TIMESTAMP(3);
+  wallet_status "CryptoWalletStatus";
 BEGIN
   SELECT "userId", "paymentRail" INTO intent_user_id, intent_rail
     FROM "PurchaseIntent" WHERE "id" = NEW."intentId";
-  SELECT "userId", "network", "chainId", "customerAddress", "executorAddress"
+  SELECT "userId", "network", "chainId", "customerAddress", "executorAddress", "status"
     INTO wallet_user_id, wallet_network, wallet_chain_id,
-         wallet_customer_address, wallet_executor_address
+         wallet_customer_address, wallet_executor_address, wallet_status
     FROM "CryptoWalletAccount" WHERE "id" = NEW."walletAccountId";
   SELECT "walletAccountId", "network", "chainId", "customerAddress",
-         "spenderAddress", "tokenAddress", "tokenDecimals", "allowanceAtomic"
+         "spenderAddress", "tokenAddress", "tokenDecimals", "allowanceAtomic",
+         "assetSymbol", "status", "validAfter", "validUntil"
     INTO permission_wallet_id, permission_network, permission_chain_id,
          permission_customer_address, permission_spender_address,
-         permission_token, permission_decimals, permission_allowance
+         permission_token, permission_decimals, permission_allowance,
+         permission_symbol, permission_status,
+         permission_valid_after, permission_valid_until
     FROM "CryptoSpendPermission" WHERE "id" = NEW."spendPermissionId";
 
   IF intent_rail <> 'CRYPTO' OR intent_user_id <> wallet_user_id
@@ -295,9 +355,33 @@ BEGIN
     OR lower(permission_token) <> lower(NEW."tokenAddress")
     OR permission_decimals <> NEW."tokenDecimals"
     OR NEW."amountAtomic" > permission_allowance
+    -- The approved terms name the asset the customer saw. Matching only the
+    -- token address would let a payment label the same token differently from
+    -- the permission that will actually be spent.
+    OR permission_symbol <> NEW."assetSymbol"
   THEN
     RAISE EXCEPTION 'crypto_payment_scope_mismatch';
   END IF;
+
+  -- A payment against a permission that is already revoked, expired, or invalid,
+  -- or one whose validity window has closed, can never execute. Rejecting it at
+  -- insert keeps it from taking the one-active-per-intent slot and surfacing as
+  -- an onchain failure much later.
+  IF permission_status <> 'ACTIVE'
+    OR now() < permission_valid_after
+    OR now() >= permission_valid_until
+  THEN
+    RAISE EXCEPTION 'crypto_payment_permission_not_spendable';
+  END IF;
+
+  IF wallet_status <> 'ACTIVE' THEN
+    RAISE EXCEPTION 'crypto_payment_wallet_not_active';
+  END IF;
+
+  -- NOTE: the allowance check above is per payment. Two payments under one
+  -- permission can each satisfy amountAtomic <= allowanceAtomic while their sum
+  -- exceeds it. Period accounting belongs to the permission lifecycle work
+  -- (#194); the onchain Spend Permission remains the binding limit until then.
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

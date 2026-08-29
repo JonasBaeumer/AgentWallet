@@ -67,6 +67,30 @@ async function createPayment(
   });
 }
 
+async function createPermission(
+  overrides: Partial<Prisma.CryptoSpendPermissionUncheckedCreateInput> = {},
+) {
+  return prisma.cryptoSpendPermission.create({
+    data: {
+      walletAccountId,
+      permissionHash: uniqueHex(),
+      network: CryptoNetwork.BASE_SEPOLIA,
+      chainId: 84532,
+      customerAddress: CUSTOMER,
+      spenderAddress: EXECUTOR,
+      tokenAddress: TOKEN,
+      assetSymbol: 'USDC',
+      tokenDecimals: 6,
+      allowanceAtomic: new Prisma.Decimal(ALLOWANCE),
+      periodSeconds: 86_400,
+      validAfter: new Date(Date.now() - 60_000),
+      validUntil: new Date(Date.now() + 86_400_000),
+      status: 'ACTIVE',
+      ...overrides,
+    },
+  });
+}
+
 beforeAll(async () => {
   const user = await prisma.user.create({
     data: { email: `crypto-model-${Date.now()}@test.local` },
@@ -109,11 +133,20 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.cryptoPayment.deleteMany({ where: { walletAccountId } });
-  await prisma.cryptoSpendPermission.deleteMany({ where: { walletAccountId } });
-  await prisma.cryptoWalletAccount.delete({ where: { id: walletAccountId } });
-  await prisma.purchaseIntent.deleteMany({ where: { userId } });
-  await prisma.user.delete({ where: { id: userId } });
+  // These ids are assigned in beforeAll. If a create there rejects, Jest still
+  // runs this hook with them undefined, and Prisma reads `undefined` in a where
+  // clause as "no filter" -- deleteMany would then wipe every CryptoPayment and
+  // every PurchaseIntent in the target database, including the card fixtures
+  // these tests exist to leave alone.
+  if (walletAccountId) {
+    await prisma.cryptoPayment.deleteMany({ where: { walletAccountId } });
+    await prisma.cryptoSpendPermission.deleteMany({ where: { walletAccountId } });
+    await prisma.cryptoWalletAccount.delete({ where: { id: walletAccountId } });
+  }
+  if (userId) {
+    await prisma.purchaseIntent.deleteMany({ where: { userId } });
+    await prisma.user.delete({ where: { id: userId } });
+  }
   await prisma.$disconnect();
 });
 
@@ -195,5 +228,138 @@ describe('crypto payment database invariants', () => {
         data: { status: CryptoPaymentStatus.SUCCEEDED },
       }),
     ).rejects.toThrow('crypto_payment_invalid_status_transition');
+  });
+
+  it('permanently closes an intent once a payment succeeds', async () => {
+    const intent = await createIntent();
+    const payment = await createPayment(intent.id);
+
+    for (const status of [
+      CryptoPaymentStatus.PREPARED,
+      CryptoPaymentStatus.EXECUTING,
+      CryptoPaymentStatus.SUBMITTED,
+      CryptoPaymentStatus.CONFIRMING,
+      CryptoPaymentStatus.SUCCEEDED,
+    ]) {
+      await prisma.cryptoPayment.update({ where: { id: payment.id }, data: { status } });
+    }
+
+    // A different digest and execution key must not buy a second payment for an
+    // intent that has already been paid.
+    await expect(createPayment(intent.id)).rejects.toThrow();
+  });
+
+  it('rejects a payment against a revoked spend permission', async () => {
+    const intent = await createIntent();
+    const revoked = await createPermission({ status: 'REVOKED', revokedAt: new Date() });
+
+    await expect(createPayment(intent.id, { spendPermissionId: revoked.id })).rejects.toThrow(
+      'crypto_payment_permission_not_spendable',
+    );
+  });
+
+  it('rejects a payment against a pending spend permission', async () => {
+    const intent = await createIntent();
+    const pending = await createPermission({ status: 'PENDING' });
+
+    await expect(createPayment(intent.id, { spendPermissionId: pending.id })).rejects.toThrow(
+      'crypto_payment_permission_not_spendable',
+    );
+  });
+
+  it('rejects a payment whose permission window has already closed', async () => {
+    const intent = await createIntent();
+    const expired = await createPermission({
+      validAfter: new Date(Date.now() - 172_800_000),
+      validUntil: new Date(Date.now() - 60_000),
+    });
+
+    await expect(createPayment(intent.id, { spendPermissionId: expired.id })).rejects.toThrow(
+      'crypto_payment_permission_not_spendable',
+    );
+  });
+
+  it('rejects a payment whose permission window has not opened yet', async () => {
+    const intent = await createIntent();
+    const future = await createPermission({
+      validAfter: new Date(Date.now() + 60_000),
+      validUntil: new Date(Date.now() + 86_400_000),
+    });
+
+    await expect(createPayment(intent.id, { spendPermissionId: future.id })).rejects.toThrow(
+      'crypto_payment_permission_not_spendable',
+    );
+  });
+
+  it('rejects a payment on a suspended wallet', async () => {
+    const intent = await createIntent();
+    await prisma.cryptoWalletAccount.update({
+      where: { id: walletAccountId },
+      data: { status: 'SUSPENDED' },
+    });
+
+    try {
+      await expect(createPayment(intent.id)).rejects.toThrow('crypto_payment_wallet_not_active');
+    } finally {
+      await prisma.cryptoWalletAccount.update({
+        where: { id: walletAccountId },
+        data: { status: 'ACTIVE' },
+      });
+    }
+  });
+
+  it('rejects a payment whose asset symbol differs from the permission', async () => {
+    const intent = await createIntent();
+    await expect(createPayment(intent.id, { assetSymbol: 'DAI' })).rejects.toThrow(
+      'crypto_payment_scope_mismatch',
+    );
+  });
+});
+
+describe('address canonicalization', () => {
+  it('stores a checksummed wallet address lowercased', async () => {
+    const mixed = `0x${'AbCdEf0123'.repeat(4)}`;
+    const user = await prisma.user.create({
+      data: { email: `crypto-case-${Date.now()}@test.local` },
+    });
+
+    const wallet = await prisma.cryptoWalletAccount.create({
+      data: {
+        userId: user.id,
+        network: CryptoNetwork.BASE_SEPOLIA,
+        chainId: 84532,
+        customerAddress: mixed,
+        executorAddress: `0x${'9'.repeat(40)}`,
+        executorAccountId: `cdp-case-${Date.now()}`,
+        executorAccountName: `agentwallet-case-${Date.now()}`,
+        status: 'ACTIVE',
+      },
+    });
+
+    expect(wallet.customerAddress).toBe(mixed.toLowerCase());
+
+    // The uniqueness index is a plain TEXT index, so it only holds because the
+    // stored value is canonical. Re-inserting the checksummed form must collide.
+    const other = await prisma.user.create({
+      data: { email: `crypto-case-dup-${Date.now()}@test.local` },
+    });
+    await expect(
+      prisma.cryptoWalletAccount.create({
+        data: {
+          userId: other.id,
+          network: CryptoNetwork.BASE_SEPOLIA,
+          chainId: 84532,
+          customerAddress: mixed,
+          executorAddress: `0x${'8'.repeat(40)}`,
+          executorAccountId: `cdp-case-dup-${Date.now()}`,
+          executorAccountName: `agentwallet-case-dup-${Date.now()}`,
+          status: 'ACTIVE',
+        },
+      }),
+    ).rejects.toThrow();
+
+    await prisma.cryptoWalletAccount.delete({ where: { id: wallet.id } });
+    await prisma.user.delete({ where: { id: user.id } });
+    await prisma.user.delete({ where: { id: other.id } });
   });
 });

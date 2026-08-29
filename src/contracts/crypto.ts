@@ -4,9 +4,9 @@ import {
   CryptoPermissionStatus as PrismaCryptoPermissionStatus,
   CryptoProtocol as PrismaCryptoProtocol,
   CryptoWalletStatus as PrismaCryptoWalletStatus,
-  PaymentRail as PrismaPaymentRail,
   Prisma,
 } from '@prisma/client';
+import { z } from 'zod';
 
 export {
   PrismaCryptoNetwork as CryptoNetwork,
@@ -14,8 +14,11 @@ export {
   PrismaCryptoPermissionStatus as CryptoPermissionStatus,
   PrismaCryptoProtocol as CryptoProtocol,
   PrismaCryptoWalletStatus as CryptoWalletStatus,
-  PrismaPaymentRail as PaymentRail,
 };
+
+// PaymentRail is re-exported by ./intent, which owns the intent-facing contract.
+// Both star-export from the same @prisma/client binding, so duplicating it here
+// compiles but gives the two modules room to diverge later.
 
 export enum CryptoPaymentEvent {
   USER_APPROVED = 'USER_APPROVED',
@@ -32,19 +35,45 @@ export enum CryptoPaymentEvent {
   RECONCILIATION_FOUND = 'RECONCILIATION_FOUND',
 }
 
-export interface CryptoTokenAmount {
-  readonly displayCurrency: string;
-  readonly displayAmount: Prisma.Decimal | null;
-  readonly assetSymbol: string;
-  readonly tokenAddress: string;
-  readonly tokenDecimals: number;
-  readonly amountAtomic: Prisma.Decimal;
-}
+const decimal = z.instanceof(Prisma.Decimal);
+
+/**
+ * Mirrors the CHECK constraints the migration puts on these columns. Without it
+ * a bad value first fails at insert, as a raw constraint name such as
+ * `crypto_payment_symbols`, which no caller can map back to a field.
+ *
+ * Addresses are lowercase because the database normalizes them on write; the
+ * uniqueness indexes are plain TEXT indexes and would otherwise admit the same
+ * address twice in different cases.
+ */
+export const CryptoTokenAmountSchema = z.object({
+  displayCurrency: z
+    .string()
+    .regex(/^[a-z]{3}$/, 'displayCurrency must be a 3-letter lowercase code'),
+  displayAmount: decimal.nullable(),
+  assetSymbol: z
+    .string()
+    .regex(/^[A-Z0-9]{2,16}$/, 'assetSymbol must be 2-16 uppercase alphanumerics'),
+  tokenAddress: z
+    .string()
+    .regex(/^0x[0-9a-f]{40}$/, 'tokenAddress must be a lowercase 0x EVM address'),
+  tokenDecimals: z.number().int().min(0).max(255),
+  amountAtomic: decimal.refine((value) => value.greaterThan(0), 'amountAtomic must be positive'),
+});
+
+export type CryptoTokenAmount = Readonly<z.infer<typeof CryptoTokenAmountSchema>>;
 
 export class IllegalCryptoPaymentTransitionError extends Error {
   constructor(currentStatus: PrismaCryptoPaymentStatus, event: CryptoPaymentEvent) {
     super(`Illegal crypto payment transition from ${currentStatus} via ${event}`);
     this.name = 'IllegalCryptoPaymentTransitionError';
+  }
+}
+
+export class CryptoPaymentNotFoundError extends Error {
+  constructor(paymentId: string) {
+    super(`Crypto payment not found: ${paymentId}`);
+    this.name = 'CryptoPaymentNotFoundError';
   }
 }
 

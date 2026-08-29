@@ -2,11 +2,21 @@ import { CryptoPayment, CryptoPaymentStatus, Prisma } from '@prisma/client';
 import { prisma } from '@/db/client';
 import {
   CryptoPaymentEvent,
+  CryptoPaymentNotFoundError,
   CryptoPaymentTransitionConflictError,
   IllegalCryptoPaymentTransitionError,
 } from '@/contracts/crypto';
 
-const TRANSITIONS = new Map<string, CryptoPaymentStatus>([
+/**
+ * The same rule about which state follows which is also encoded in the database:
+ * `enforce_crypto_payment_status_transition()` and the predicate of
+ * `CryptoPayment_one_active_per_intent_key`. That duplication is deliberate -- it
+ * keeps direct SQL and future workers inside the reviewed lifecycle -- but none
+ * of the three copies is loud when it drifts. Exported so
+ * `tests/integration/db/cryptoTransitionParity.test.ts` can read all three and
+ * assert they still agree.
+ */
+export const TRANSITIONS = new Map<string, CryptoPaymentStatus>([
   [
     `${CryptoPaymentStatus.AWAITING_APPROVAL}:${CryptoPaymentEvent.USER_APPROVED}`,
     CryptoPaymentStatus.PREPARED,
@@ -107,8 +117,17 @@ function transitionTimestamps(
   status: CryptoPaymentStatus,
   now: Date,
 ) {
-  const reconciliation =
-    previousStatus === CryptoPaymentStatus.RECONCILING ? { reconciledAt: now } : {};
+  // Leaving RECONCILING only counts as reconciled if reconciliation actually
+  // resolved something. RECONCILING + SUBMISSION_AMBIGUOUS returns to
+  // SUBMISSION_UNKNOWN with the payment still ambiguous, and the next
+  // RECONCILING writes a fresh reconciliationStartedAt -- so stamping
+  // reconciledAt on that edge leaves the row with reconciledAt earlier than
+  // reconciliationStartedAt, and any query treating a non-null reconciledAt as
+  // "finished" reports a false positive for a payment that is still unresolved.
+  const resolvesReconciliation =
+    previousStatus === CryptoPaymentStatus.RECONCILING &&
+    status !== CryptoPaymentStatus.SUBMISSION_UNKNOWN;
+  const reconciliation = resolvesReconciliation ? { reconciledAt: now } : {};
 
   switch (status) {
     case CryptoPaymentStatus.SUBMITTED:
@@ -139,7 +158,7 @@ export async function transitionCryptoPayment(
 ): Promise<CryptoPaymentTransitionResult> {
   return prisma.$transaction(async (tx) => {
     const payment = await tx.cryptoPayment.findUnique({ where: { id: paymentId } });
-    if (!payment) throw new Error(`Crypto payment not found: ${paymentId}`);
+    if (!payment) throw new CryptoPaymentNotFoundError(paymentId);
 
     const previousStatus = payment.status;
     const newStatus = getNextCryptoPaymentStatus(previousStatus, event);
@@ -155,7 +174,11 @@ export async function transitionCryptoPayment(
         intentId: payment.intentId,
         actor,
         event: `CRYPTO_${event}`,
-        payload: { paymentId, previousStatus, newStatus, ...payload } as Prisma.JsonObject,
+        // Caller metadata is nested rather than spread: a payload carrying
+        // paymentId, previousStatus, or newStatus would otherwise overwrite the
+        // authoritative transition values and record a misleading financial
+        // audit event while the state update itself was correct.
+        payload: { paymentId, previousStatus, newStatus, detail: payload } as Prisma.JsonObject,
       },
     });
 

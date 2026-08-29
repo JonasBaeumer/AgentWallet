@@ -3,6 +3,7 @@ jest.mock('@/db/client', () => ({ prisma: { $transaction: jest.fn() } }));
 import { CryptoPaymentStatus } from '@prisma/client';
 import {
   CryptoPaymentEvent,
+  CryptoPaymentNotFoundError,
   CryptoPaymentTransitionConflictError,
   IllegalCryptoPaymentTransitionError,
 } from '@/contracts';
@@ -138,7 +139,7 @@ describe('crypto payment transition transaction', () => {
           paymentId: 'payment-1',
           previousStatus: CryptoPaymentStatus.SUBMISSION_UNKNOWN,
           newStatus: CryptoPaymentStatus.RECONCILING,
-          attempt: 2,
+          detail: { attempt: 2 },
         },
       },
     });
@@ -166,5 +167,88 @@ describe('crypto payment transition transaction', () => {
       transitionCryptoPayment('payment-1', CryptoPaymentEvent.EXECUTION_STARTED, 'crypto-worker'),
     ).rejects.toThrow(CryptoPaymentTransitionConflictError);
     expect(auditCreate).not.toHaveBeenCalled();
+  });
+
+  // RECONCILING + SUBMISSION_AMBIGUOUS returns to SUBMISSION_UNKNOWN with nothing
+  // resolved. Stamping reconciledAt there leaves the row with reconciledAt older
+  // than the reconciliationStartedAt written by the next attempt, so any query
+  // treating a non-null reconciledAt as "finished" reports a false positive.
+  it('does not record reconciliation as complete when it stays ambiguous', async () => {
+    const { updateMany } = arrangeTransaction(CryptoPaymentStatus.RECONCILING);
+
+    await transitionCryptoPayment(
+      'payment-1',
+      CryptoPaymentEvent.SUBMISSION_AMBIGUOUS,
+      'reconciler',
+    );
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'payment-1', status: CryptoPaymentStatus.RECONCILING },
+      data: { status: CryptoPaymentStatus.SUBMISSION_UNKNOWN },
+    });
+  });
+
+  it.each([
+    [CryptoPaymentEvent.RECONCILIATION_FOUND, CryptoPaymentStatus.CONFIRMING],
+    [CryptoPaymentEvent.PAYMENT_REVERTED, CryptoPaymentStatus.FAILED_ONCHAIN],
+  ])('records reconciliation as complete on the resolving edge %s', async (event, expected) => {
+    const { updateMany } = arrangeTransaction(CryptoPaymentStatus.RECONCILING);
+
+    await transitionCryptoPayment('payment-1', event, 'reconciler');
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'payment-1', status: CryptoPaymentStatus.RECONCILING },
+      data: expect.objectContaining({ status: expected, reconciledAt: expect.any(Date) }),
+    });
+  });
+
+  // A caller payload naming a reserved field would otherwise overwrite the
+  // authoritative transition values and record a misleading financial audit
+  // event, even though the state update itself was correct.
+  it('keeps a caller payload from overriding the audited transition', async () => {
+    const { auditCreate } = arrangeTransaction(CryptoPaymentStatus.PREPARED);
+
+    await transitionCryptoPayment(
+      'payment-1',
+      CryptoPaymentEvent.EXECUTION_STARTED,
+      'crypto-worker',
+      {
+        paymentId: 'attacker-supplied',
+        previousStatus: CryptoPaymentStatus.SUCCEEDED,
+        newStatus: CryptoPaymentStatus.SUCCEEDED,
+      },
+    );
+
+    expect(auditCreate).toHaveBeenCalledWith({
+      data: {
+        intentId: 'intent-1',
+        actor: 'crypto-worker',
+        event: 'CRYPTO_EXECUTION_STARTED',
+        payload: {
+          paymentId: 'payment-1',
+          previousStatus: CryptoPaymentStatus.PREPARED,
+          newStatus: CryptoPaymentStatus.EXECUTING,
+          detail: {
+            paymentId: 'attacker-supplied',
+            previousStatus: CryptoPaymentStatus.SUCCEEDED,
+            newStatus: CryptoPaymentStatus.SUCCEEDED,
+          },
+        },
+      },
+    });
+  });
+
+  it('throws a typed error when the payment does not exist', async () => {
+    const transactionClient = {
+      cryptoPayment: { findUnique: jest.fn().mockResolvedValue(null) },
+    };
+    (mockPrisma.$transaction as jest.Mock).mockImplementation(
+      async (callback: (tx: typeof transactionClient) => Promise<unknown>) =>
+        callback(transactionClient),
+    );
+
+    await expect(
+      transitionCryptoPayment('missing', CryptoPaymentEvent.USER_APPROVED, 'crypto-worker'),
+    ).rejects.toThrow(CryptoPaymentNotFoundError);
   });
 });
