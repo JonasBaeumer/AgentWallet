@@ -201,3 +201,73 @@ describe('Coinbase environment configuration', () => {
     expect(env).not.toHaveProperty('VITE_CDP_PROJECT_ID');
   });
 });
+
+describe('blank environment values', () => {
+  const originalEnv = process.env;
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  // dotenv turns a bare `KEY=` line into '', which `z.string().default()` does
+  // not treat as absent. The previous `process.env.X || fallback` form did, so
+  // blank has to keep meaning "unset" or existing .env files stop booting.
+  it.each([
+    ['PORT', 'PORT', 3000],
+    ['STRIPE_SECRET_KEY', 'STRIPE_SECRET_KEY', 'sk_test_placeholder'],
+    ['STRIPE_WEBHOOK_SECRET', 'STRIPE_WEBHOOK_SECRET', 'whsec_placeholder'],
+    ['CDP_NETWORK', 'CDP_NETWORK', 'base-sepolia'],
+    ['CDP_EXECUTOR_ACCOUNT_PREFIX', 'CDP_EXECUTOR_ACCOUNT_PREFIX', 'agentwallet-executor'],
+    ['PAYMENT_PROVIDER', 'PAYMENT_PROVIDER', 'stripe'],
+    ['LOG_LEVEL', 'LOG_LEVEL', 'info'],
+  ])('treats a blank %s as unset and applies the default', (_label, key, expected) => {
+    const env = getLoader()({ ...BASE_ENV, [key]: '' }) as Record<string, unknown>;
+
+    expect(env[key]).toBe(expected);
+  });
+
+  it('treats a whitespace-only value as unset', () => {
+    expect(getLoader()({ ...BASE_ENV, PORT: '   ' }).PORT).toBe(3000);
+  });
+
+  it('accepts a numeric value padded with whitespace, as parseInt did', () => {
+    expect(getLoader()({ ...BASE_ENV, PORT: ' 3000 ' }).PORT).toBe(3000);
+  });
+
+  it('treats a blank CRYPTO_PAYMENTS_ENABLED as disabled', () => {
+    expect(getLoader()({ ...BASE_ENV, CRYPTO_PAYMENTS_ENABLED: '' }).CRYPTO_PAYMENTS_ENABLED).toBe(
+      false,
+    );
+  });
+
+  it('still rejects a required value that is blank', () => {
+    expect(() => getLoader()({ ...BASE_ENV, DATABASE_URL: '' })).toThrow(
+      /DATABASE_URL is required/,
+    );
+  });
+});
+
+describe('TELEGRAM_MOCK parsing', () => {
+  const originalEnv = process.env;
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it.each([
+    ['unset', undefined, false],
+    ['blank', '', false],
+    ['false', 'false', false],
+    ['true', 'true', true],
+  ])('resolves %s to %s', (_label, value, expected) => {
+    expect(getLoader()({ ...BASE_ENV, TELEGRAM_MOCK: value }).TELEGRAM_MOCK).toBe(expected);
+  });
+
+  // Intentional tightening of the old `=== 'true'` test, which silently read a
+  // typo as "not mocked" and sent real Telegram traffic.
+  it.each(['1', 'TRUE', 'yes', 'on'])('rejects the non-canonical value %s', (value) => {
+    expect(() => getLoader()({ ...BASE_ENV, TELEGRAM_MOCK: value })).toThrow(
+      /Invalid environment configuration/,
+    );
+  });
+});

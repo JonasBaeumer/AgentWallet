@@ -11,6 +11,10 @@ const MAX_EXECUTOR_ACCOUNT_PREFIX_LENGTH = 20;
 const MAX_X402_CONFIRMATION_COUNT = 64;
 const MAX_X402_SUBMISSION_RETRIES = 10;
 
+// NOTE: `required_error` is Zod 3 syntax. Zod 4 replaces it (and
+// `invalid_type_error`) with the unified `error` parameter, at which point these
+// custom messages silently revert to Zod defaults. The three call sites in this
+// file are part of the migration surface tracked by #183.
 const nonEmptyString = (name: string) =>
   z
     .string({ required_error: `${name} is required` })
@@ -20,6 +24,7 @@ const nonEmptyString = (name: string) =>
 const integerString = (name: string, minimum: number, maximum: number) =>
   z
     .string({ required_error: `${name} is required when crypto payments are enabled` })
+    .trim()
     .regex(/^\d+$/, `${name} must be an integer between ${minimum} and ${maximum}`)
     .transform(Number)
     .refine(
@@ -58,6 +63,10 @@ const commonSchema = z.object({
   TELEGRAM_WEBHOOK_SECRET: z.string().default(''),
   TELEGRAM_TEST_CHAT_ID: z.string().default(''),
   TELEGRAM_TEST_CHANNEL_ID: z.string().default(''),
+  // Deliberately stricter than the previous `=== 'true'` test. That form treated
+  // a typo such as TELEGRAM_MOCK=1 as "not mocked", which sends real Telegram
+  // traffic from a run that was meant to be mocked; failing at startup surfaces
+  // it immediately. Blank stays equivalent to unset -- see normalizeSource.
   TELEGRAM_MOCK: z
     .enum(['true', 'false'])
     .default('false')
@@ -65,10 +74,10 @@ const commonSchema = z.object({
   PAYMENT_PROVIDER: z.string().default('stripe'),
   LOG_LEVEL: z.string().default('info'),
   CDP_NETWORK: z
-    .string()
-    .default('base-sepolia')
-    .refine((value) => value === 'base-sepolia', 'CDP_NETWORK must be base-sepolia')
-    .transform(() => 'base-sepolia' as const),
+    .literal('base-sepolia', {
+      errorMap: () => ({ message: 'CDP_NETWORK must be base-sepolia' }),
+    })
+    .default('base-sepolia'),
   CDP_EXECUTOR_ACCOUNT_PREFIX: z
     .string()
     .min(
@@ -148,6 +157,23 @@ function parseSchema<TSchema extends z.ZodTypeAny>(
   );
 }
 
+/**
+ * `dotenv` sets a key declared without a value to `''`, and `z.string().default()`
+ * only fires on `undefined`. Without this, a bare `PORT=` line -- the shape
+ * .env.example already uses for the optional Telegram keys -- is a hard startup
+ * failure, and a blank STRIPE_SECRET_KEY reaches the Stripe client as `''`
+ * instead of the placeholder. Both previously fell back to their defaults via
+ * `process.env.X || fallback`, so treat blank as absent everywhere rather than
+ * letting the two disagree.
+ */
+function normalizeSource(source: EnvironmentSource): EnvironmentSource {
+  const normalized: EnvironmentSource = {};
+  for (const [key, value] of Object.entries(source)) {
+    normalized[key] = value === undefined || value.trim() === '' ? undefined : value;
+  }
+  return normalized;
+}
+
 function parseCryptoEnabled(value: string | undefined): boolean {
   if (value === undefined || value === 'false') return false;
   if (value === 'true') return true;
@@ -156,7 +182,8 @@ function parseCryptoEnabled(value: string | undefined): boolean {
   ]);
 }
 
-export function loadEnv(source: EnvironmentSource = process.env): Env {
+export function loadEnv(rawSource: EnvironmentSource = process.env): Env {
+  const source = normalizeSource(rawSource);
   const common = parseSchema(commonSchema, source);
 
   if (!parseCryptoEnabled(source.CRYPTO_PAYMENTS_ENABLED)) {
