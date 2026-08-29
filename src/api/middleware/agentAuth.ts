@@ -137,6 +137,48 @@ export async function agentRegistrationAuthMiddleware(
   await workerAuthMiddleware(request, reply);
 }
 
+/**
+ * Re-reads the credential and link that authentication cached on the request.
+ *
+ * The authentication hook runs once, early. A caller that has already sent its
+ * headers can hold the connection open and finish the request later -- after the
+ * user unlinks or the credential is revoked or rotated. `request.authenticatedAgent`
+ * still holds the identity captured before that happened, so a guard that compares
+ * only the cached identity will authorize a mutation the agent is no longer
+ * entitled to make. Anything that moves money or reveals a card therefore has to
+ * confirm the credential is still live at the moment it acts, not at the moment
+ * the request arrived.
+ *
+ * This is a re-read by agent id, not a second bcrypt verification: the credential
+ * itself was already proven, and the fields that can change underneath it --
+ * revocation, rotation, expiry, and the user link -- are all observable without it.
+ */
+async function agentLinkStillValid(agent: AuthenticatedAgent): Promise<boolean> {
+  const record = await prisma.pairingCode.findUnique({
+    where: { agentId: agent.id },
+    select: {
+      claimedByUserId: true,
+      credentialExpiresAt: true,
+      credentialVersion: true,
+      credentialRevokedAt: true,
+    },
+  });
+
+  if (!record || record.credentialRevokedAt) return false;
+  if (record.credentialVersion !== agent.credentialVersion) return false;
+  if (!record.credentialExpiresAt || record.credentialExpiresAt.getTime() <= Date.now()) {
+    return false;
+  }
+  if (!record.claimedByUserId || record.claimedByUserId !== agent.userId) return false;
+
+  // The link is bidirectional; a stale claimedByUserId must not resurrect it.
+  const claimedUser = await prisma.user.findUnique({
+    where: { id: record.claimedByUserId },
+    select: { agentId: true },
+  });
+  return claimedUser?.agentId === agent.id;
+}
+
 export async function requireOwnedIntent(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -149,6 +191,16 @@ export async function requireOwnedIntent(
       403,
       'agent_not_linked',
       'Forbidden: authenticated agent is not linked to a user',
+    );
+    return null;
+  }
+
+  if (!(await agentLinkStillValid(agent))) {
+    sendAgentAuthError(
+      reply,
+      401,
+      'agent_credential_invalid',
+      'Unauthorized: agent credential was revoked, rotated, or unlinked',
     );
     return null;
   }

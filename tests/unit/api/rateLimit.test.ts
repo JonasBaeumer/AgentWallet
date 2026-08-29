@@ -482,3 +482,30 @@ describe('Per-route: GET /v1/agent/card/:intentId (max 2 per agent)', () => {
     expect(resB[0].statusCode).toBe(429);
   });
 });
+
+// The global limiter has to run ahead of authentication. If it runs after, every
+// request in an invalid-credential flood still reaches the PairingCode lookup and
+// the bcrypt verifier before it can be counted, and the advertised 60/min ceiling
+// buys nothing against exactly the traffic it exists to shed.
+describe('Global rate limit runs before agent authentication', () => {
+  it('sheds an invalid-credential flood without hitting the credential store', async () => {
+    const ip = '10.5.0.1';
+    const bogusKey = `agk_${'z'.repeat(43)}`;
+    const { prisma } = jest.requireMock('@/db/client') as {
+      prisma: { pairingCode: { findUnique: jest.Mock } };
+    };
+
+    prisma.pairingCode.findUnique.mockClear();
+
+    const responses = await fireRequests('GET', '/v1/agent/user', 70, {
+      ip,
+      headers: { 'x-agent-key': bogusKey },
+    });
+
+    const limited = responses.filter((res) => res.statusCode === 429);
+    expect(limited.length).toBe(10);
+
+    // Only the 60 requests inside the budget may reach the credential lookup.
+    expect(prisma.pairingCode.findUnique.mock.calls.length).toBeLessThanOrEqual(60);
+  });
+});

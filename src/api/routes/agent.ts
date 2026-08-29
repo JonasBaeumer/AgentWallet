@@ -32,13 +32,30 @@ function generatePairingCode(): string {
   ).join('');
 }
 
+/**
+ * Card reveals allowed per agent per minute, across all of its intents.
+ *
+ * This is a business limit, not a retry guard. The previous key was the intent
+ * id, which any caller could sidestep by rotating the intent; keying on the
+ * verified agent closes that. The cost is that it also bounds an agent's total
+ * checkout throughput at this number, so an agent working several intents queues
+ * behind itself. Raising it weakens the reveal ceiling, and scoping it to
+ * agent + intent reopens the bypass -- pick deliberately, and note that the
+ * single-reveal rule in the card service, not this limit, is what makes a second
+ * reveal of the same card impossible.
+ */
+const CARD_REVEAL_MAX_PER_MINUTE = 2;
+
+/** Bootstrap/renewal budget per agent (or per IP before an agent is known). */
+const AGENT_REGISTRATION_MAX_PER_10_MINUTES = 3;
+
 export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /v1/agent/quote — authenticated agent posts a search result
   // Flow: SEARCHING → QUOTED → AWAITING_APPROVAL
   fastify.post(
     '/v1/agent/quote',
     {
-      onRequest: [claimedAgentAuthMiddleware, agentContextHook],
+      preHandler: [claimedAgentAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = agentQuoteSchema.safeParse(request.body);
@@ -81,7 +98,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
     '/v1/agent/result',
     {
-      onRequest: [claimedAgentAuthMiddleware, agentContextHook],
+      preHandler: [claimedAgentAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = agentResultSchema.safeParse(request.body);
@@ -139,7 +156,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{ Params: { intentId: string } }>(
     '/v1/agent/decision/:intentId',
     {
-      onRequest: [claimedAgentAuthMiddleware, agentContextHook],
+      preHandler: [claimedAgentAuthMiddleware, agentContextHook],
     },
     async (request, reply) => {
       const { intentId } = request.params;
@@ -185,14 +202,16 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
     {
       config: {
         rateLimit: {
-          max: 2,
+          // preHandler so the key can see the identity established by the route's
+          // own auth hook; the global onRequest limiter has already shed floods.
+          hook: 'preHandler',
+          max: CARD_REVEAL_MAX_PER_MINUTE,
           timeWindow: '1 minute',
-          keyGenerator: (req: FastifyRequest) => {
-            return `card-reveal:${req.authenticatedAgent?.id ?? 'unauthenticated'}`;
-          },
+          keyGenerator: (req: FastifyRequest) =>
+            `card-reveal:${req.authenticatedAgent?.id ?? 'unauthenticated'}`,
         },
       },
-      onRequest: [claimedAgentAuthMiddleware, agentContextHook],
+      preHandler: [claimedAgentAuthMiddleware, agentContextHook],
     },
     async (request, reply) => {
       const { intentId } = request.params;
@@ -223,7 +242,8 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
     {
       config: {
         rateLimit: {
-          max: 3,
+          hook: 'preHandler',
+          max: AGENT_REGISTRATION_MAX_PER_10_MINUTES,
           timeWindow: '10 minutes',
           keyGenerator: (req: FastifyRequest) =>
             req.authenticatedAgent?.id
@@ -231,7 +251,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
               : (req.ip ?? 'unknown'),
         },
       },
-      onRequest: [agentRegistrationAuthMiddleware, agentContextHook],
+      preHandler: [agentRegistrationAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = agentRegisterSchema.safeParse(request.body);
@@ -311,7 +331,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
     '/v1/agent/credential/rotate',
     {
-      onRequest: [agentAuthMiddleware, agentContextHook],
+      preHandler: [agentAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const agent = request.authenticatedAgent!;
@@ -366,7 +386,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/v1/agent/user',
     {
-      onRequest: [agentAuthMiddleware, agentContextHook],
+      preHandler: [agentAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const agent = request.authenticatedAgent!;

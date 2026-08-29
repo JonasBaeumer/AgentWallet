@@ -75,6 +75,13 @@ Failure responses:
 | Expired agent key | 401 | `{ "error": "Unauthorized: agent credential has expired", "code": "agent_credential_expired" }` |
 | Agent is not linked to a user | 403 | `{ "error": "Forbidden: authenticated agent is not linked to a user", "code": "agent_not_linked" }` |
 | Agent does not own the intent | 403 | `{ "error": "Forbidden: intent does not belong to the authenticated agent", "code": "agent_intent_forbidden" }` |
+| Credential revoked, rotated, or unlinked mid-request | 401 | `{ "error": "Unauthorized: agent credential was revoked, rotated, or unlinked", "code": "agent_credential_invalid" }` |
+
+Authentication is checked when the request arrives, and again against the live
+credential immediately before any route that mutates an intent or reveals a card
+acts on it. A request that authenticates and then completes after its credential
+is revoked, rotated, expired, or unlinked is rejected at that second check, so a
+slow request cannot outlive the authority it was granted.
 
 ### Routes without auth
 
@@ -118,6 +125,11 @@ An **intent** is a single shopping task with a hard budget. It walks the state
 machine `RECEIVED → SEARCHING → QUOTED → AWAITING_APPROVAL → APPROVED → CARD_ISSUED → CHECKOUT_RUNNING → DONE`.
 
 ### `POST /v1/intents`
+
+Requires the caller's user to have a linked agent. Creation returns `409`
+`agent_not_linked` otherwise: an intent stored without an agent can never satisfy
+the ownership check on any agent route, so it would be enqueued and then stall
+permanently.
 
 Create a purchase intent. Transitions immediately to `SEARCHING` and enqueues a
 search job for the agent.

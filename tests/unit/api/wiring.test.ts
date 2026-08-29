@@ -313,6 +313,34 @@ describe('POST /v1/intents wiring', () => {
     expect(typeof intentId).toBe('string');
   });
 
+  // An intent created with agentId = null is enqueued, advances to SEARCHING, and
+  // then fails requireOwnedIntent on every agent route for the rest of its life.
+  // Nothing attaches an agent to it later, so creation has to fail instead.
+  it('refuses to create an intent for a user with no linked agent', async () => {
+    const linkedAgentId = dbUsers['user-1'].agentId;
+    dbUsers['user-1'].agentId = null;
+
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/intents',
+        headers: {
+          'content-type': 'application/json',
+          'x-idempotency-key': 'idem-unlinked',
+          authorization: AUTH_HEADER,
+        },
+        body: JSON.stringify({ query: 'headphones', maxBudget: 10000, currency: 'gbp' }),
+      });
+
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe('agent_not_linked');
+      expect(mockStartSearching).not.toHaveBeenCalled();
+      expect(mockEnqueueSearch).not.toHaveBeenCalled();
+    } finally {
+      dbUsers['user-1'].agentId = linkedAgentId;
+    }
+  });
+
   it("binds a new intent to the user's currently linked agent", async () => {
     const res = await app.inject({
       method: 'POST',

@@ -383,3 +383,228 @@ describe('credential rotation', () => {
     );
   });
 });
+
+// The authentication hook runs once, early. A caller can pass it and then finish
+// the request after the credential is revoked, rotated, or unlinked, at which
+// point request.authenticatedAgent still holds the identity captured before that
+// happened. Every guarded mutation therefore re-reads the live record. Each case
+// below lets authentication see the live credential and changes it only in time
+// for the recheck, which is the window a slow request actually opens.
+describe('revocation between authentication and the guarded mutation', () => {
+  const liveFindUnique = pairingCodeStore.findUnique.getMockImplementation()!;
+
+  const changeAfterAuthentication = (mutate: () => void) => {
+    let calls = 0;
+    pairingCodeStore.findUnique.mockImplementation((args: any) => {
+      calls += 1;
+      // Call 1 is authentication; call 2 is the recheck inside requireOwnedIntent.
+      if (calls === 2) mutate();
+      return liveFindUnique(args);
+    });
+  };
+
+  beforeEach(() => {
+    pairingCodeStore.findUnique.mockImplementation(liveFindUnique);
+    dbIntents['intent-race-quote'] = {
+      id: 'intent-race-quote',
+      userId: 'user-a',
+      agentId: AGENT_A_ID,
+      status: IntentStatus.SEARCHING,
+      maxBudget: 5000,
+      currency: 'eur',
+    };
+    dbIntents['intent-race-result'] = {
+      id: 'intent-race-result',
+      userId: 'user-a',
+      agentId: AGENT_A_ID,
+      status: IntentStatus.CHECKOUT_RUNNING,
+      maxBudget: 5000,
+      currency: 'eur',
+    };
+    dbIntents['intent-race-card'] = {
+      id: 'intent-race-card',
+      userId: 'user-a',
+      agentId: AGENT_A_ID,
+      status: IntentStatus.CARD_ISSUED,
+      maxBudget: 5000,
+      currency: 'eur',
+    };
+  });
+
+  afterAll(() => {
+    pairingCodeStore.findUnique.mockImplementation(liveFindUnique);
+  });
+
+  const quotePayload = {
+    intentId: 'intent-race-quote',
+    merchantName: 'Merchant',
+    merchantUrl: 'https://merchant.example',
+    price: 100,
+    currency: 'eur',
+  };
+
+  it('rejects a quote whose credential is revoked after authentication', async () => {
+    changeAfterAuthentication(() => {
+      dbAgents[AGENT_A_ID].credentialRevokedAt = new Date();
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'x-agent-key': AGENT_A_KEY },
+      payload: quotePayload,
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().code).toBe('agent_credential_invalid');
+    expect(mockReceiveQuote).not.toHaveBeenCalled();
+  });
+
+  it('rejects a quote whose agent is unlinked after authentication', async () => {
+    changeAfterAuthentication(() => {
+      dbAgents[AGENT_A_ID].claimedByUserId = null;
+      dbUsers['user-a'].agentId = null;
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'x-agent-key': AGENT_A_KEY },
+      payload: quotePayload,
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(mockReceiveQuote).not.toHaveBeenCalled();
+  });
+
+  it('rejects a card reveal whose credential is rotated after authentication', async () => {
+    changeAfterAuthentication(() => {
+      dbAgents[AGENT_A_ID].credentialVersion += 1;
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/agent/card/intent-race-card',
+      headers: { 'x-agent-key': AGENT_A_KEY },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(mockRevealCard).not.toHaveBeenCalled();
+  });
+
+  it('rejects a result whose credential expires after authentication', async () => {
+    changeAfterAuthentication(() => {
+      dbAgents[AGENT_A_ID].credentialExpiresAt = new Date(Date.now() - 1000);
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/result',
+      headers: { 'x-agent-key': AGENT_A_KEY },
+      payload: { intentId: 'intent-race-result', success: true, actualAmount: 100 },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(mockCompleteCheckout).not.toHaveBeenCalled();
+  });
+
+  it('still allows the mutation while the credential stays live', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'x-agent-key': AGENT_A_KEY },
+      payload: quotePayload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockReceiveQuote).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The hook-in-isolation tests above hand agentContextHook a literal body, which
+// cannot occur if the hook is registered at onRequest -- that fires before body
+// parsing, so request.body is undefined there and the two routes that carry
+// intentId in the body (quote and result) would log intentId: null. Asserting
+// through app.inject is what makes the registration point observable.
+describe('log correlation through a real request', () => {
+  const bindingsSeen: Record<string, unknown>[] = [];
+  let correlationApp: FastifyInstance;
+
+  beforeAll(async () => {
+    correlationApp = buildApp();
+    correlationApp.addHook('onSend', async (request) => {
+      bindingsSeen.push(
+        (request.log as unknown as { bindings(): Record<string, unknown> }).bindings(),
+      );
+    });
+    await correlationApp.ready();
+  });
+
+  afterAll(async () => {
+    await correlationApp.close();
+  });
+
+  beforeEach(() => {
+    bindingsSeen.length = 0;
+    dbIntents['intent-correlate'] = {
+      id: 'intent-correlate',
+      userId: 'user-a',
+      agentId: AGENT_A_ID,
+      status: IntentStatus.SEARCHING,
+      maxBudget: 5000,
+      currency: 'eur',
+    };
+  });
+
+  it('correlates a body-supplied intentId on the quote route', async () => {
+    const res = await correlationApp.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'x-agent-key': AGENT_A_KEY },
+      payload: {
+        intentId: 'intent-correlate',
+        merchantName: 'Merchant',
+        merchantUrl: 'https://merchant.example',
+        price: 100,
+        currency: 'eur',
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(bindingsSeen[0]).toMatchObject({
+      agentId: AGENT_A_ID,
+      agentUserId: 'user-a',
+      intentId: 'intent-correlate',
+      route: '/v1/agent/quote',
+    });
+  });
+
+  it('correlates a body-supplied intentId on the result route', async () => {
+    dbIntents['intent-correlate'].status = IntentStatus.CHECKOUT_RUNNING;
+
+    const res = await correlationApp.inject({
+      method: 'POST',
+      url: '/v1/agent/result',
+      headers: { 'x-agent-key': AGENT_A_KEY },
+      payload: { intentId: 'intent-correlate', success: true, actualAmount: 100 },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(bindingsSeen[0]).toMatchObject({ intentId: 'intent-correlate' });
+  });
+
+  it('correlates a params-supplied intentId on the card route', async () => {
+    dbIntents['intent-correlate'].status = IntentStatus.CARD_ISSUED;
+
+    await correlationApp.inject({
+      method: 'GET',
+      url: '/v1/agent/card/intent-correlate',
+      headers: { 'x-agent-key': AGENT_A_KEY },
+    });
+
+    expect(bindingsSeen[0]).toMatchObject({
+      intentId: 'intent-correlate',
+      route: '/v1/agent/card/:intentId',
+    });
+  });
+});

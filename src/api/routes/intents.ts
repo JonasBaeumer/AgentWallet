@@ -40,6 +40,19 @@ export async function intentRoutes(fastify: FastifyInstance): Promise<void> {
 
       const user = request.user!;
       const userId = user.id;
+
+      // Fail closed rather than creating an intent no agent can ever act on.
+      // agentId is what requireOwnedIntent matches against on every agent route,
+      // so a null here produces a row that is enqueued, advances to SEARCHING,
+      // and then rejects every quote, result, decision, and card call for its
+      // whole life. There is no path that later attaches an agent to it.
+      if (!user.agentId) {
+        return reply.status(409).send({
+          error: 'Link an agent before creating an intent',
+          code: 'agent_not_linked',
+        });
+      }
+
       const { query, subject, maxBudget, expiresAt } = parsed.data;
 
       // Currency is derived from the user's payment provider — not caller-supplied —
