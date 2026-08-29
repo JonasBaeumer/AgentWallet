@@ -29,12 +29,26 @@ The first Coinbase rail is deliberately narrow:
 | Customer wallet | Customer-controlled CDP Smart Account |
 | Executor | Dedicated CDP EVM account per AgentWallet customer |
 | Delegation | Onchain, time-bounded USDC Spend Permission |
+| Allowance | Single non-renewing cap — `period` equals the full validity window |
 | Approval | AgentWallet approval tied to an immutable x402 challenge |
 | Protocol | x402 `exact` scheme only |
 | Agent integration | Restricted AgentKit custom action provider |
 
 The customer wallet remains the source of funds. The per-customer executor can
-spend only within the permission recorded onchain. AgentKit is an orchestration
+spend only within the permission recorded onchain.
+
+Spend Permission allowances are period-based: the contract resets the spent total
+every `period` seconds, so an allowance is a recurring budget unless the period is
+made as long as the permission itself. First launch does not want a recurring
+budget. AgentWallet therefore creates every permission with
+`period == validUntil - validAfter`, which yields exactly one spending window and
+makes the allowance a lifetime cap for that permission. A customer who wants to
+spend again creates a new permission; AgentWallet never extends or renews one.
+
+Both sides of the boundary enforce this. Permission creation rejects any period
+shorter than the validity window, and preflight validation recomputes the same
+equality before signing, so a permission created outside AgentWallet — or altered
+after creation — cannot present a renewing allowance to the executor. AgentKit is an orchestration
 surface, not an authorization boundary: every action must call the crypto payment
 service, which revalidates approval, permission, network, asset, recipient, amount,
 expiry, and challenge identity immediately before submission.
@@ -76,6 +90,7 @@ onchain transactions.
 | Rule | Primary enforcement | Defense in depth |
 | --- | --- | --- |
 | Executor cannot exceed the delegated USDC amount or expiry | Spend Permission contract | AgentWallet preflight validation |
+| Allowance cannot renew and refill after a period boundary | `period` set to the full validity window at creation | Preflight rejects a permission whose period is shorter than its window |
 | Only an approved payment may execute | AgentWallet database and state machine | AgentKit exposes no raw send/sign action |
 | Recipient, amount, asset, network, and x402 scheme cannot change after approval | Immutable challenge digest in AgentWallet | Re-fetch and exact comparison before signing |
 | A payment is submitted at most once | AgentWallet idempotency record | Stable CDP idempotency key and onchain reconciliation |
@@ -127,8 +142,8 @@ challenge creates a new approval flow rather than mutating the approved record.
 | Credential or key | Owner | Storage | Rotation and recovery |
 | --- | --- | --- | --- |
 | Customer Smart Account signer | Customer / CDP user-wallet system | Never stored by AgentWallet | Customer completes CDP recovery; AgentWallet cannot export it |
-| CDP API key ID and private key | AgentWallet operator | Deployment secret manager only | Rotate with overlapping keys, verify health, then revoke old key |
-| CDP wallet secret | AgentWallet operator | Deployment secret manager only | Generate a replacement in CDP, roll deployment, verify account access, revoke old secret |
+| CDP API key ID and private key | AgentWallet operator | Deployment secret manager only | Supports overlap: create the replacement, roll deployment, verify health, then revoke the old key |
+| CDP wallet secret | AgentWallet operator | Deployment secret manager only | No overlap window — rotating in CDP invalidates the previous secret immediately. Treat as a planned signing outage: disable execution, reconcile in-flight payments, rotate, update every signing process together, verify account access, re-enable |
 | Per-customer executor key | CDP wallet platform | Not exported or logged by AgentWallet | Recover through CDP account APIs; revoke Spend Permission if access is uncertain |
 | `VITE_CDP_PROJECT_ID` | Frontend application | Public build-time configuration | Rotate projects/configuration; it is an identifier, not a secret |
 
@@ -167,6 +182,12 @@ The root package therefore overrides that transitive dependency to patched Axios
 1.19.0. This override must remain until Coinbase publishes a CDP SDK whose own
 dependency range resolves to a patched release; removing it requires a production
 dependency audit and CDP authentication smoke test.
+
+Dependabot's npm support does not raise PRs or alerts against `overrides`
+entries, so a future Axios advisory will not surface here on its own. The
+`@coinbase/*` Dependabot group is the observable trigger: when it opens a CDP SDK
+bump, re-check the override at that point and remove it once the SDK's own range
+resolves to a patched Axios.
 
 ## Threat model and required response
 
