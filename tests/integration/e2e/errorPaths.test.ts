@@ -106,8 +106,14 @@ const mockDb = {
   },
   ledgerEntry: { create: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
   pairingCode: {
+    // Two lookup shapes: by credentialPrefix during authentication, and by
+    // agentId when requireOwnedIntent re-reads the live record before a
+    // mutation. A double that answers only the first reads as "revoked" on the
+    // recheck and turns every guarded route into a 401.
     findUnique: jest.fn(({ where }: any) => {
-      if (where.credentialPrefix === TEST_AGENT_KEY.slice(0, 16)) {
+      const matchesPrefix = where.credentialPrefix === TEST_AGENT_KEY.slice(0, 16);
+      const matchesAgent = where.agentId === TEST_AGENT_ID;
+      if (matchesPrefix || matchesAgent) {
         return Promise.resolve({
           agentId: TEST_AGENT_ID,
           claimedByUserId: TEST_USER.id,
