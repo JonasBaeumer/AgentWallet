@@ -339,6 +339,52 @@ describe('POST /v1/agent/quote wiring', () => {
     };
   }
 
+  it('rejects a quote whose currency differs from the intent', async () => {
+    seedSearchingIntent('intent-q-cur');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      body: JSON.stringify({
+        intentId: 'intent-q-cur',
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 9999,
+        currency: 'eur',
+      }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('quote_currency_mismatch');
+    expect(mockReceiveQuote).not.toHaveBeenCalled();
+  });
+
+  // currency is optional; omitting it must not be read as EUR, because the
+  // intent's currency comes from the user's payment provider and need not be.
+  it('accepts a quote with no currency and stores the intent currency', async () => {
+    seedSearchingIntent('intent-q-nocur');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      body: JSON.stringify({
+        intentId: 'intent-q-nocur',
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 9999,
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockReceiveQuote).toHaveBeenCalledWith(
+      'intent-q-nocur',
+      expect.objectContaining({ currency: 'gbp' }),
+      undefined,
+    );
+  });
+
   it('calls receiveQuote then requestApproval via orchestrator', async () => {
     seedSearchingIntent('intent-q1');
 

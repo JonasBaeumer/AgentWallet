@@ -20,7 +20,12 @@ export async function sendApprovalRequest(intentId: string): Promise<void> {
   const metadata = intent.metadata as Record<string, unknown>;
   const merchantName = (metadata.merchantName as string) ?? 'Unknown merchant';
   const price = (metadata.price as number) ?? intent.maxBudget;
-  const currency = ((metadata.currency as string) ?? intent.currency).toUpperCase();
+  // Always the intent's own currency, never the quote's. The quote currency is
+  // caller-supplied and nothing downstream honours it -- approvals reserve in
+  // intent.currency and the card is issued in the provider's currency -- so
+  // taking it here made the agent the sole author of the label on the one screen
+  // where the user consents, including the label on the user's own budget.
+  const currency = intent.currency.toUpperCase();
   const taskTitle = intent.subject ?? intent.query;
 
   const text =

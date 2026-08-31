@@ -53,8 +53,23 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
           .send({ error: `Intent must be in SEARCHING state (current: ${intent.status})` });
       }
 
+      // The intent's currency is derived server-side from the user's payment
+      // provider (see routes/intents.ts) and is what actually reserves funds and
+      // issues the card. A quote in a different currency cannot be honoured, so
+      // reject it rather than storing a value nothing downstream will use.
+      if (currency !== undefined && currency.toLowerCase() !== intent.currency.toLowerCase()) {
+        return reply.status(400).send({
+          error: `Quote currency ${currency.toLowerCase()} does not match intent currency ${intent.currency.toLowerCase()}`,
+          code: 'quote_currency_mismatch',
+        });
+      }
+
       // SEARCHING → QUOTED (stores quote data in metadata via orchestrator)
-      await receiveQuote(intentId, { merchantName, merchantUrl, price, currency }, request.agentId);
+      await receiveQuote(
+        intentId,
+        { merchantName, merchantUrl, price, currency: intent.currency },
+        request.agentId,
+      );
 
       // QUOTED → AWAITING_APPROVAL
       await requestApproval(intentId, request.agentId);
