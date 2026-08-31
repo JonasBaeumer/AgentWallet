@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import type { Authorization } from 'stripe/cjs/resources/Issuing';
+import type { IssuingAuthorization } from './stripeTypes';
 import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
 import { IntentNotFoundError } from '@/contracts';
@@ -29,7 +29,7 @@ export async function runSimulatedCheckout(params: {
   const virtualCard = await prisma.virtualCard.findUnique({ where: { intentId } });
   if (!virtualCard) throw new IntentNotFoundError(intentId);
 
-  let auth: Authorization;
+  let auth: IssuingAuthorization;
   try {
     auth = await stripe.testHelpers.issuing.authorizations.create({
       card: virtualCard.providerCardId,

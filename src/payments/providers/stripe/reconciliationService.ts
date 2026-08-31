@@ -1,4 +1,4 @@
-import type { Card, Transaction } from 'stripe/cjs/resources/Issuing';
+import type { IssuingCard, IssuingTransaction } from './stripeTypes';
 import { getStripeClient } from './stripeClient';
 import { prisma } from '@/db/client';
 import { logger } from '@/config/logger';
@@ -51,8 +51,8 @@ export async function reconcileIntent(intentId: string): Promise<ReconciliationR
   // Wrap the Stripe calls so a 404/429/network blip surfaces as a structured
   // discrepancy instead of an unhandled exception. The webhook caller's outer
   // catch already swallows throws silently — we want the audit trail.
-  let stripeCard: Card;
-  let transactions: Transaction[];
+  let stripeCard: IssuingCard;
+  let transactions: IssuingTransaction[];
   try {
     stripeCard = await stripe.issuing.cards.retrieve(card.providerCardId);
     transactions = await stripe.issuing.transactions

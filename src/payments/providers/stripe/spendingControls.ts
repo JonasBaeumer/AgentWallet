@@ -1,15 +1,14 @@
-import type { Issuing as CardIssuing } from 'stripe/cjs/resources/Issuing/Cards';
+import type { AllowedMerchantCategory, CardSpendingControls } from './stripeTypes';
 
 export function buildSpendingControls(
   amountInSmallestUnit: number,
   mccAllowlist?: string[],
-): CardIssuing.CardCreateParams.SpendingControls {
+): CardSpendingControls {
   return {
     spending_limits: [{ amount: amountInSmallestUnit, interval: 'per_authorization' as const }],
     ...(mccAllowlist && mccAllowlist.length > 0
       ? {
-          allowed_categories:
-            mccAllowlist as CardIssuing.CardCreateParams.SpendingControls.AllowedCategory[],
+          allowed_categories: mccAllowlist as AllowedMerchantCategory[],
         }
       : {}),
   };
