@@ -125,4 +125,40 @@ describe('sendApprovalRequest', () => {
     await expect(sendApprovalRequest('intent-missing')).resolves.toBeUndefined();
     expect(mockSendMessage).not.toHaveBeenCalled();
   });
+
+  // The quote currency is caller-supplied and nothing downstream honours it:
+  // approvals reserve in intent.currency and the card is issued in the
+  // provider's currency. Taking it for the label made the agent the sole author
+  // of what the user sees on the one screen where consent happens -- including
+  // the label on the user's own budget, which the agent never supplied.
+  it('labels the approval with the intent currency, not the agent-supplied quote currency', async () => {
+    mockPrismaIntentFindUnique.mockResolvedValue(
+      makeIntent({
+        currency: 'eur',
+        maxBudget: 10000,
+        metadata: { merchantName: 'Amazon UK', price: 5000, currency: 'gbp' },
+      }),
+    );
+
+    await sendApprovalRequest('intent-1');
+
+    const [, text] = mockSendMessage.mock.calls[0];
+    expect(text).toContain('50.00 EUR');
+    expect(text).toContain('100.00 EUR');
+    expect(text).not.toContain('GBP');
+  });
+
+  it('falls back to the intent currency when the quote carries none', async () => {
+    mockPrismaIntentFindUnique.mockResolvedValue(
+      makeIntent({
+        currency: 'eur',
+        maxBudget: 10000,
+        metadata: { merchantName: 'Amazon UK', price: 5000 },
+      }),
+    );
+
+    await sendApprovalRequest('intent-1');
+
+    expect(mockSendMessage.mock.calls[0][1]).toContain('50.00 EUR');
+  });
 });

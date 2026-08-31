@@ -296,7 +296,7 @@ describe('Happy path: RECEIVED → DONE', () => {
         'x-idempotency-key': 'hp-idem-1',
         authorization: authHeader,
       },
-      body: JSON.stringify({ query: 'Sony WH-1000XM5', maxBudget: 30000, currency: 'gbp' }),
+      body: JSON.stringify({ query: 'Sony WH-1000XM5', maxBudget: 30000 }),
     });
     expect(res.statusCode).toBe(201);
     const body = JSON.parse(res.body);
@@ -315,7 +315,9 @@ describe('Happy path: RECEIVED → DONE', () => {
         merchantName: 'Amazon UK',
         merchantUrl: 'https://amazon.co.uk/dp/B09XS7JWHH',
         price: 27999,
-        currency: 'gbp',
+        // Must match the intent's currency, which routes/intents.ts derives from
+        // the user's payment provider (stripe -> eur) and not from the request.
+        currency: 'eur',
       }),
     });
     expect(res.statusCode).toBe(200);
