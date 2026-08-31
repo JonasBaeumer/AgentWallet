@@ -73,17 +73,24 @@ model User {
 }
 
 model PairingCode {
-  id              String    @id @default(cuid())
-  code            String    @unique
-  agentId         String    @unique
-  claimedByUserId String?
-  expiresAt       DateTime
-  createdAt       DateTime  @default(now())
+  id                  String    @id @default(cuid())
+  code                String    @unique
+  agentId             String    @unique
+  claimedByUserId     String?
+  expiresAt           DateTime
+  codeIssuedAt        DateTime  @default(now())
+  credentialHash      String?
+  credentialPrefix    String?   @unique
+  credentialExpiresAt DateTime?
+  credentialVersion   Int       @default(0)
+  credentialRevokedAt DateTime?
+  createdAt           DateTime  @default(now())
 }
 
 model PurchaseIntent {
   id               String       @id @default(cuid())
   userId           String
+  agentId          String?
   query            String
   subject          String?
   maxBudget        Int
@@ -101,6 +108,8 @@ model PurchaseIntent {
   pot              Pot?
   approvalDecision ApprovalDecision?
   auditEvents      AuditEvent[]
+
+  @@index([agentId])
 }
 
 model VirtualCard {

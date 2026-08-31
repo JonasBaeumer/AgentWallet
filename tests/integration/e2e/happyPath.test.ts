@@ -6,7 +6,10 @@ import bcrypt from 'bcryptjs';
 
 // A fixed raw API key and its bcrypt hash (computed once, reused for all tests)
 const RAW_API_KEY = 'test-api-key-for-happy-path-integration';
+const AGENT_ID = 'ag_happy_path';
+const AGENT_KEY = `agk_${'h'.repeat(43)}`;
 let API_KEY_HASH: string;
+let AGENT_KEY_HASH: string;
 
 // Mock env first
 jest.mock('@/config/env', () => ({
@@ -53,6 +56,7 @@ const store: {
   approvalDecisions: Record<string, any>;
   pots: Record<string, any>;
   ledgerEntries: any[];
+  agents: Record<string, any>;
 } = {
   intents: {},
   users: {},
@@ -62,6 +66,7 @@ const store: {
   approvalDecisions: {},
   pots: {},
   ledgerEntries: [],
+  agents: {},
 };
 
 jest.mock('@/db/client', () => ({
@@ -118,6 +123,19 @@ jest.mock('@/db/client', () => ({
       update: jest.fn(({ where, data }: any) => {
         store.users[where.id] = { ...store.users[where.id], ...data };
         return Promise.resolve(store.users[where.id]);
+      }),
+    },
+    pairingCode: {
+      findUnique: jest.fn(({ where }: any) => {
+        if (where.agentId) return Promise.resolve(store.agents[where.agentId] ?? null);
+        if (where.credentialPrefix) {
+          return Promise.resolve(
+            Object.values(store.agents).find(
+              (record: any) => record.credentialPrefix === where.credentialPrefix,
+            ) ?? null,
+          );
+        }
+        return Promise.resolve(null);
       }),
     },
     virtualCard: {
@@ -266,6 +284,7 @@ let authHeader: string;
 beforeAll(async () => {
   // Pre-compute bcrypt hash and seed the demo user with an API key
   API_KEY_HASH = await bcrypt.hash(RAW_API_KEY, 10);
+  AGENT_KEY_HASH = await bcrypt.hash(AGENT_KEY, 4);
   store.users['user-demo'] = {
     id: 'user-demo',
     email: 'demo@agentpay.dev',
@@ -275,6 +294,21 @@ beforeAll(async () => {
     mccAllowlist: [],
     apiKeyHash: API_KEY_HASH,
     apiKeyPrefix: RAW_API_KEY.slice(0, 16),
+    agentId: AGENT_ID,
+  };
+  store.agents[AGENT_ID] = {
+    id: 'pc-happy-path',
+    agentId: AGENT_ID,
+    code: 'HAPPY123',
+    claimedByUserId: 'user-demo',
+    expiresAt: new Date(Date.now() + 60_000),
+    codeIssuedAt: new Date(),
+    credentialHash: AGENT_KEY_HASH,
+    credentialPrefix: AGENT_KEY.slice(0, 16),
+    credentialExpiresAt: new Date(Date.now() + 60_000),
+    credentialVersion: 1,
+    credentialRevokedAt: null,
+    createdAt: new Date(),
   };
   authHeader = `Bearer ${RAW_API_KEY}`;
 
@@ -305,11 +339,11 @@ describe('Happy path: RECEIVED → DONE', () => {
     expect(body.status).toBe('SEARCHING');
   });
 
-  it('POST /v1/agent/quote — worker posts quote', async () => {
+  it('POST /v1/agent/quote — authenticated agent posts quote', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/quote',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': AGENT_KEY },
       body: JSON.stringify({
         intentId,
         merchantName: 'Amazon UK',
@@ -347,11 +381,11 @@ describe('Happy path: RECEIVED → DONE', () => {
     expect(JSON.parse(res.body).intent.id).toBe(intentId);
   });
 
-  it('POST /v1/agent/result — worker posts success', async () => {
+  it('POST /v1/agent/result — authenticated agent posts success', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/agent/result',
-      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      headers: { 'content-type': 'application/json', 'x-agent-key': AGENT_KEY },
       body: JSON.stringify({
         intentId,
         success: true,

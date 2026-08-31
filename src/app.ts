@@ -34,12 +34,21 @@ export function buildApp() {
     }
   });
 
-  // Global rate limit — 60 req/min per IP, Redis-backed in production
+  // Global rate limit — 60 req/min per IP, Redis-backed in production.
+  //
+  // This runs at onRequest, ahead of every route's authentication hook, and keys
+  // on the IP alone. Identity is deliberately not consulted here: an agent-keyed
+  // global limiter can only run after authentication, and anything that runs
+  // after authentication cannot shed an invalid-credential flood — each such
+  // request would still reach the PairingCode lookup and the bcrypt verifier
+  // before being counted. Per-agent budgets belong on the routes that need them,
+  // where they can run at preHandler with the identity already established.
   if (process.env.NODE_ENV !== 'test') {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getRedisClient } = require('@/config/redis');
     fastify.register(rateLimit, {
       global: true,
+      hook: 'onRequest',
       max: 60,
       timeWindow: '1 minute',
       redis: getRedisClient(),

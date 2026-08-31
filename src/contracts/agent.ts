@@ -3,6 +3,12 @@ export interface PairingCodeData {
   agentId: string;
   claimedByUserId: string | null;
   expiresAt: Date;
+  codeIssuedAt: Date;
+  credentialHash: string | null;
+  credentialPrefix: string | null;
+  credentialExpiresAt: Date | null;
+  credentialVersion: number;
+  credentialRevokedAt: Date | null;
   createdAt: Date;
 }
 

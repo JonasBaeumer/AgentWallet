@@ -1,7 +1,7 @@
 /**
  * Unit tests for POST /v1/users/:userId/unlink-agent (issue #15):
  * - Only the authenticated user can unlink their own agent
- * - All active intents are expired before the agent is unlinked
+ * - Agent access is revoked before active intents are cleaned up
  * - AGENT_UNLINKED AuditEvent is emitted
  * - User.agentId is cleared; PairingCode.claimedByUserId is cleared
  */
@@ -102,7 +102,10 @@ jest.mock('@/db/client', () => ({
       findMany: jest.fn(({ where }: any) =>
         Promise.resolve(
           Object.values(dbIntents).filter(
-            (i: any) => i.userId === where.userId && where.status?.in?.includes(i.status),
+            (i: any) =>
+              i.userId === where.userId &&
+              i.agentId === where.agentId &&
+              where.status?.in?.includes(i.status),
           ),
         ),
       ),
@@ -202,11 +205,32 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
     expect(res.json().error).toContain('No agent');
   });
 
-  it('expires all active intents before unlinking', async () => {
+  it('expires all active intents after revoking agent access', async () => {
     seedUser('ag_linked');
-    dbIntents['i-1'] = { id: 'i-1', userId: 'user-1', status: IntentStatus.SEARCHING };
-    dbIntents['i-2'] = { id: 'i-2', userId: 'user-1', status: IntentStatus.AWAITING_APPROVAL };
-    dbIntents['i-done'] = { id: 'i-done', userId: 'user-1', status: IntentStatus.DONE }; // terminal — not expired
+    dbIntents['i-1'] = {
+      id: 'i-1',
+      userId: 'user-1',
+      agentId: 'ag_linked',
+      status: IntentStatus.SEARCHING,
+    };
+    dbIntents['i-2'] = {
+      id: 'i-2',
+      userId: 'user-1',
+      agentId: 'ag_linked',
+      status: IntentStatus.AWAITING_APPROVAL,
+    };
+    dbIntents['i-done'] = {
+      id: 'i-done',
+      userId: 'user-1',
+      agentId: 'ag_linked',
+      status: IntentStatus.DONE,
+    }; // terminal — not expired
+    dbIntents['i-other-agent'] = {
+      id: 'i-other-agent',
+      userId: 'user-1',
+      agentId: 'ag_replacement',
+      status: IntentStatus.SEARCHING,
+    };
 
     const res = await app.inject({
       method: 'POST',
@@ -215,9 +239,14 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
     });
 
     expect(res.statusCode).toBe(200);
+    expect(txMock.pairingCode.updateMany).toHaveBeenCalled();
+    expect(txMock.pairingCode.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      mockExpireIntent.mock.invocationCallOrder[0],
+    );
     expect(mockExpireIntent).toHaveBeenCalledWith('i-1');
     expect(mockExpireIntent).toHaveBeenCalledWith('i-2');
     expect(mockExpireIntent).not.toHaveBeenCalledWith('i-done');
+    expect(mockExpireIntent).not.toHaveBeenCalledWith('i-other-agent');
     const body = res.json();
     expect(body.cancelledIntentIds).toContain('i-1');
     expect(body.cancelledIntentIds).toContain('i-2');
@@ -252,7 +281,14 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
     expect(txMock.pairingCode.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { agentId: 'ag_linked', claimedByUserId: 'user-1' },
-        data: { claimedByUserId: null, expiresAt: new Date(0) },
+        data: expect.objectContaining({
+          claimedByUserId: null,
+          expiresAt: new Date(0),
+          credentialHash: null,
+          credentialPrefix: null,
+          credentialExpiresAt: null,
+          credentialVersion: { increment: 1 },
+        }),
       }),
     );
   });
@@ -281,7 +317,12 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
 
   it('returns success response with agentId and cancelled intent IDs', async () => {
     seedUser('ag_linked');
-    dbIntents['i-active'] = { id: 'i-active', userId: 'user-1', status: IntentStatus.SEARCHING };
+    dbIntents['i-active'] = {
+      id: 'i-active',
+      userId: 'user-1',
+      agentId: 'ag_linked',
+      status: IntentStatus.SEARCHING,
+    };
 
     const res = await app.inject({
       method: 'POST',
@@ -298,10 +339,16 @@ describe('POST /v1/users/:userId/unlink-agent', () => {
 
   it('continues unlinking even if expiring an intent fails, and omits failed intent from cancelledIntentIds', async () => {
     seedUser('ag_linked');
-    dbIntents['i-ok'] = { id: 'i-ok', userId: 'user-1', status: IntentStatus.SEARCHING };
+    dbIntents['i-ok'] = {
+      id: 'i-ok',
+      userId: 'user-1',
+      agentId: 'ag_linked',
+      status: IntentStatus.SEARCHING,
+    };
     dbIntents['i-fail'] = {
       id: 'i-fail',
       userId: 'user-1',
+      agentId: 'ag_linked',
       status: IntentStatus.AWAITING_APPROVAL,
     };
     // First call succeeds, second fails

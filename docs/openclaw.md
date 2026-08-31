@@ -29,9 +29,9 @@ sign up via Telegram. This is a one-time setup per OpenClaw instance.
 ```
 OpenClaw                        Backend                         User (Telegram)
   │                                │                                 │
-  │── POST /v1/agent/register ────▶│── { agentId, pairingCode,       │
-  │   (first time only)            │    expiresAt }                  │
-  │   stores agentId permanently   │                                 │
+  │── POST /v1/agent/register ────▶│── { agentId, agentKey,          │
+  │   X-Worker-Key (bootstrap)      │    pairingCode, expiresAt }     │
+  │   stores agentId + key securely│                                 │
   │                                │                                 │
   │   (gives user the code + bot   │                                 │
   │    link: t.me/YourBot)         │                                 │
@@ -41,27 +41,38 @@ OpenClaw                        Backend                         User (Telegram)
   │                                │    Bot: "✅ Account created!"   │
   │                                │                                 │
   │── GET /v1/agent/user ─────────▶│── { status: "claimed",         │
-  │   X-Agent-Id: <agentId>        │    userId: "clx..." }           │
+  │   X-Agent-Key: <agentKey>      │    userId: "clx..." }           │
   │   (store userId permanently)   │                                 │
 ```
 
-Once OpenClaw has a `userId` it can create purchase intents for that user.
+Once OpenClaw has a `userId`, the user must add the API key returned by Telegram
+to the agent's secret store. The key authenticates user-facing intent creation;
+the separate agent key authenticates subsequent agent operations.
 
 If the pairing code expires before the user signs up, call `POST /v1/agent/register` again
-with `{ agentId }` to get a fresh code. The `agentId` is stable and never changes.
+with `X-Agent-Key` and an empty body. The authenticated `agentId` is stable and never
+comes from request data.
 
 ---
 
 ## Authentication
 
-Every request to an agent endpoint requires the `X-Worker-Key` header:
+Initial registration is the only route that accepts the server's bootstrap key:
 
 ```
 X-Worker-Key: <WORKER_API_KEY>
 ```
 
-The value must match the `WORKER_API_KEY` environment variable configured on the server.
-Missing or incorrect key → `401 Unauthorized`.
+The response contains `agentKey` exactly once. Store it in the OpenClaw instance's secret
+store, never in source control or logs. Every subsequent agent request uses:
+
+```
+X-Agent-Key: <agentKey>
+```
+
+The backend stores only a bcrypt verifier and a lookup prefix. `X-Agent-Id` is optional
+compatibility metadata; it never establishes identity and a mismatched value is rejected.
+Credentials expire after 90 days and should be rotated before expiry.
 
 For local development the default value is `local-dev-worker-key`.
 
@@ -70,7 +81,8 @@ For local development the default value is `local-dev-worker-key`.
 ## Full Integration Flow
 
 > **Prerequisite:** complete [Onboarding](#onboarding-first-time-setup) before making
-> any purchase. You need a stable `agentId` and a linked `userId`.
+> any purchase. You need a stable `agentId`, linked `userId`, per-agent key,
+> and the user's API key.
 
 OpenClaw drives every step. The backend responds to requests — it never pushes to the agent.
 
@@ -125,13 +137,9 @@ If the user rejects:
 
 Register a new OpenClaw instance (first time) or renew an expired pairing code.
 
-**Auth:** `X-Worker-Key` required.
+**Auth:** `X-Worker-Key` for first registration; `X-Agent-Key` for pairing-code renewal.
 
-**Request body (all optional):**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `agentId` | `string` | No | Omit on first call. Pass existing `agentId` to renew a code. |
+**Request body:** an empty JSON object. Caller-supplied agent IDs are rejected.
 
 ```json
 {}
@@ -142,28 +150,64 @@ Register a new OpenClaw instance (first time) or renew an expired pairing code.
 ```json
 {
   "agentId": "ag_a1b2c3d4e5f6",
+  "agentKey": "agk_...",
+  "agentKeyExpiresAt": "2026-11-17T13:00:00.000Z",
   "pairingCode": "AB3X9K2M",
-  "expiresAt": "2026-02-22T13:00:00.000Z"
+  "expiresAt": "2026-08-19T13:10:00.000Z"
 }
 ```
 
-Store `agentId` permanently. Give `pairingCode` to the user (valid for 30 minutes).
+Store `agentId` and `agentKey` securely. The key is not retrievable later. Give
+`pairingCode` to the user; it is valid for 10 minutes.
 
-**Renewal (pass existing `agentId`):**
+**Renewal:** send the current `X-Agent-Key` with an empty body:
 
 ```json
-{ "agentId": "ag_a1b2c3d4e5f6" }
+{}
 ```
 
-Returns the same shape with a new `pairingCode`.
+**Success response `200` — pairing-code renewal:**
+
+```json
+{
+  "agentId": "ag_a1b2c3d4e5f6",
+  "pairingCode": "ZX7Q2MNP",
+  "expiresAt": "2026-08-19T13:20:00.000Z"
+}
+```
+
+Renewal does not rotate or redisplay the agent credential.
 
 **Error responses:**
 
 | Status | Condition |
 |--------|-----------|
-| `401` | Missing or wrong `X-Worker-Key` |
-| `404` | `agentId` not found (renewal) |
+| `401` | Missing/invalid bootstrap key or agent credential |
 | `409` | Agent already has a linked user — re-registration not needed |
+| `429` | Registration or renewal rate limit hit |
+
+---
+
+### POST /v1/agent/credential/rotate
+
+Replace the current credential before it expires. Rotation preserves the `agentId`, user
+link, and active intents, and invalidates the old key immediately.
+
+**Auth:** current `X-Agent-Key`.
+
+**Response `200`:**
+
+```json
+{
+  "agentId": "ag_a1b2c3d4e5f6",
+  "agentKey": "agk_...",
+  "agentKeyExpiresAt": "2026-11-20T13:00:00.000Z",
+  "credentialVersion": 2
+}
+```
+
+Replace the stored key atomically. If the response is lost, unlink and pair a new agent;
+the old key may already be invalid.
 
 ---
 
@@ -171,7 +215,7 @@ Returns the same shape with a new `pairingCode`.
 
 Resolve the `userId` linked to this OpenClaw instance.
 
-**Auth:** `X-Worker-Key` required. Also supply `X-Agent-Id: <agentId>` header.
+**Auth:** `X-Agent-Key` required.
 
 **Response `200` — user not yet signed up:**
 
@@ -187,15 +231,14 @@ Keep displaying the pairing code to the user (or renew it if expired).
 { "status": "claimed", "userId": "clxyz123" }
 ```
 
-Store `userId` permanently. Use it in all `POST /v1/intents` calls.
+Store `userId` permanently for account correlation. The user's bearer key, not
+a caller-supplied user ID, determines ownership on `POST /v1/intents`.
 
 **Error responses:**
 
 | Status | Condition |
 |--------|-----------|
-| `400` | Missing `X-Agent-Id` header |
-| `401` | Missing or wrong `X-Worker-Key` |
-| `404` | `agentId` not found |
+| `401` | Missing, invalid, rotated, or expired agent credential |
 
 ---
 
@@ -204,32 +247,30 @@ Store `userId` permanently. Use it in all `POST /v1/intents` calls.
 Register a new purchase intent. Call this once per task, before posting a quote.
 Returns an `intentId` that is used in all subsequent calls.
 
-**Auth:** None (user-facing endpoint). Supply a unique `X-Idempotency-Key` header.
+**Auth:** the user's `Authorization: Bearer <api-key>`. Supply a unique
+`X-Idempotency-Key` header as well.
 
 **Headers:**
 
 | Header | Required | Description |
 |--------|----------|-------------|
+| `Authorization` | Yes | User bearer API key returned during Telegram signup |
 | `X-Idempotency-Key` | Yes | Any unique string (e.g. UUID). Prevents duplicate intents on retry. |
 
 **Request body:**
 
 | Field | Type | Required | Constraints |
 |-------|------|----------|-------------|
-| `userId` | `string` | Yes | ID of the user on whose behalf the agent is acting |
 | `query` | `string` | Yes | Free-text shopping task (e.g. "Sony WH-1000XM5 headphones"), max 500 chars |
 | `subject` | `string` | No | Short task title for notifications, max 100 chars |
 | `maxBudget` | `integer` | Yes | Maximum spend in smallest currency unit (pence/cents), max 1 000 000 |
-| `currency` | `string` | No | 3-letter ISO code, lowercase (e.g. `eur`, `gbp`); default `eur` |
 | `expiresAt` | `string` | No | ISO 8601 datetime after which the intent expires |
 
 ```json
 {
-  "userId": "user_abc123",
   "query": "Sony WH-1000XM5 headphones, black",
   "subject": "Buy Sony headphones",
-  "maxBudget": 30000,
-  "currency": "gbp"
+  "maxBudget": 30000
 }
 ```
 
@@ -248,7 +289,7 @@ Returns an `intentId` that is used in all subsequent calls.
 | Status | Condition |
 |--------|-----------|
 | `400` | Missing `X-Idempotency-Key`, or invalid fields |
-| `404` | `userId` not found |
+| `401` | Missing or invalid user bearer key |
 
 > **Note:** This endpoint also enqueues a job on the internal `search-queue`. If you are
 > running the stub worker at the same time as a real OpenClaw instance, the stub worker will
@@ -261,7 +302,7 @@ Returns an `intentId` that is used in all subsequent calls.
 Submit the product you found. This transitions the intent to `AWAITING_APPROVAL` and sends
 the user a Telegram notification with an approve/reject button.
 
-**Auth:** `X-Worker-Key` required.
+**Auth:** `X-Agent-Key` required. The intent must belong to this exact agent and its user.
 
 **Request body:**
 
@@ -294,7 +335,8 @@ the user a Telegram notification with an approve/reject button.
 | Status | Condition |
 |--------|-----------|
 | `400` | Missing or invalid fields |
-| `401` | Missing or wrong `X-Worker-Key` |
+| `401` | Missing, invalid, rotated, or expired agent credential |
+| `403` | Agent is unlinked or does not own the intent |
 | `404` | `intentId` not found |
 | `409` | Intent is not in `SEARCHING` state |
 
@@ -307,7 +349,7 @@ Do not post another quote for the same `intentId`. The user is now deciding.
 Poll this endpoint after posting a quote to learn the user's decision and, on approval,
 receive the one-time virtual card details.
 
-**Auth:** `X-Worker-Key` required.
+**Auth:** `X-Agent-Key` required. The intent must belong to this exact agent and its user.
 
 **URL parameter:** `intentId` from step 2.
 
@@ -353,7 +395,8 @@ call); `maxBudget` is used as a fallback if no quote price is recorded.
 
 | Status | Condition |
 |--------|-----------|
-| `401` | Missing or wrong `X-Worker-Key` |
+| `401` | Missing, invalid, rotated, or expired agent credential |
+| `403` | Agent is unlinked or does not own the intent |
 | `404` | `intentId` not found |
 
 **Recommended polling strategy:**
@@ -370,7 +413,7 @@ call); `maxBudget` is used as a fallback if no quote price is recorded.
 Report the checkout outcome. This finalises the intent, settles or returns the ledger
 reservation, and cancels the virtual card.
 
-**Auth:** `X-Worker-Key` required.
+**Auth:** `X-Agent-Key` required. The intent must belong to this exact agent and its user.
 
 **Request body:**
 
@@ -420,7 +463,8 @@ or on failure:
 | Status | Condition |
 |--------|-----------|
 | `400` | Missing or invalid fields |
-| `401` | Missing or wrong `X-Worker-Key` |
+| `401` | Missing, invalid, rotated, or expired agent credential |
+| `403` | Agent is unlinked or does not own the intent |
 | `404` | `intentId` not found |
 | `409` | Intent is not in `CHECKOUT_RUNNING` state |
 
@@ -542,7 +586,26 @@ Common `declineCode` values:
 | Variable | Description |
 |----------|-------------|
 | `API_BASE_URL` | Base URL of the backend, e.g. `http://localhost:3000` |
-| `WORKER_API_KEY` | Shared secret for `X-Worker-Key` header |
+| `OPENCLAW_AGENT_KEY` | Per-instance secret returned once by registration; used as `X-Agent-Key` |
+| `AGENTPAY_API_KEY` | User bearer key returned during Telegram signup; used only on user-facing routes |
+
+### Existing-installation migration
+
+The old shared worker key cannot prove which legacy agent is calling, so there is no safe
+automatic exchange by `agentId`. For each existing installation:
+
+1. Upgrade the backend and apply the database migration. Existing active intents are bound
+   to the currently linked agent, but legacy agents have no credential and cannot call agent
+   routes.
+2. Finish or explicitly expire in-flight work before the upgrade window.
+3. Unlink the legacy agent from the user's account.
+4. Bootstrap a fresh registration with `X-Worker-Key`, store the returned `agentKey`, and
+   have the user approve the new pairing code.
+5. Remove `WORKER_API_KEY` from the OpenClaw runtime. It is a server-side bootstrap secret,
+   not an operational agent credential.
+
+If a key is compromised, unlink immediately. Unlinking revokes the verifier and expires
+that agent's active intents; then repeat the fresh-registration flow.
 
 ---
 
@@ -551,6 +614,9 @@ Common `declineCode` values:
 The repository includes a stub BullMQ worker (`src/worker/`) that simulates OpenClaw for
 local testing. It consumes the `search-queue` and `checkout-queue` (Redis), posts a
 hardcoded quote, and reports success immediately.
+
+Set `OPENCLAW_AGENT_KEY` to the key returned for the single agent used by the stub worker.
+The worker cannot process intents owned by any other agent.
 
 This is a test fixture only. A real OpenClaw implementation uses the HTTP flow above and
 does not need Redis or BullMQ at all.

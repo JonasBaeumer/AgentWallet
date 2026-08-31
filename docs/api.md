@@ -50,25 +50,38 @@ Failure responses:
 | Missing / non-Bearer header | 401 | `{ "error": "Unauthorized: missing or invalid Authorization header" }` |
 | Bad key | 401 | `{ "error": "Unauthorized: invalid API key" }` |
 
-### 2. Worker key — for agent routes
+### 2. Agent key — for agent routes
 
-Agent / OpenClaw routes require the shared worker secret plus an agent identifier:
+Each OpenClaw instance authenticates with its own credential:
 
 ```
-X-Worker-Key: <WORKER_API_KEY from env>
-X-Agent-Id:   <ag_...>   # returned by POST /v1/agent/register
+X-Agent-Key: <agentKey returned once by POST /v1/agent/register>
 ```
 
-The worker key is a single process-global secret (`WORKER_API_KEY`). The agent
-id is per-OpenClaw-instance; it becomes the `actor` on every audit event
-emitted by that agent and is included in every structured log line on
-`/v1/agent/*` routes.
+Only a bcrypt verifier and lookup prefix are stored by the backend. The verified
+credential determines the agent and linked user; a caller-supplied `X-Agent-Id`
+never grants access. Credentials expire after 90 days and can be rotated with
+`POST /v1/agent/credential/rotate`.
+
+`WORKER_API_KEY` remains a server-side bootstrap secret and is accepted only by
+the first `POST /v1/agent/register` call. Never ship it with an OpenClaw agent.
 
 Failure responses:
 
 | Condition | Status | Body |
 |---|---|---|
-| Missing / wrong worker key | 401 | `{ "error": "Unauthorized: invalid or missing X-Worker-Key" }` |
+| Missing agent key | 401 | `{ "error": "Unauthorized: invalid or missing X-Agent-Key", "code": "agent_credential_missing" }` |
+| Invalid / rotated agent key | 401 | `{ "error": "Unauthorized: invalid or rotated agent credential", "code": "agent_credential_invalid" }` |
+| Expired agent key | 401 | `{ "error": "Unauthorized: agent credential has expired", "code": "agent_credential_expired" }` |
+| Agent is not linked to a user | 403 | `{ "error": "Forbidden: authenticated agent is not linked to a user", "code": "agent_not_linked" }` |
+| Agent does not own the intent | 403 | `{ "error": "Forbidden: intent does not belong to the authenticated agent", "code": "agent_intent_forbidden" }` |
+| Credential revoked, rotated, or unlinked mid-request | 401 | `{ "error": "Unauthorized: agent credential was revoked, rotated, or unlinked", "code": "agent_credential_invalid" }` |
+
+Authentication is checked when the request arrives, and again against the live
+credential immediately before any route that mutates an intent or reveals a card
+acts on it. A request that authenticates and then completes after its credential
+is revoked, rotated, expired, or unlinked is rejected at that second check, so a
+slow request cannot outlive the authority it was granted.
 
 ### Routes without auth
 
@@ -99,7 +112,8 @@ land in `error` (not `message`).
 ## Conventions
 
 - All monetary amounts are **integer minor units** (e.g. cents). `maxBudget: 30000` means €300.00.
-- Currency is ISO-4217, lower case (`eur`, `gbp`, `usd`). Default is `eur`.
+- Currency is ISO-4217, lower case (`eur`, `gbp`, `usd`), and is derived from
+  the authenticated user's configured payment provider.
 - All dates are ISO-8601 UTC strings.
 - Every state-changing user-facing route requires a unique `X-Idempotency-Key` header; repeating a request with the same key replays the stored response body (see [idempotency middleware](../src/api/middleware/idempotency.ts)).
 
@@ -111,6 +125,11 @@ An **intent** is a single shopping task with a hard budget. It walks the state
 machine `RECEIVED → SEARCHING → QUOTED → AWAITING_APPROVAL → APPROVED → CARD_ISSUED → CHECKOUT_RUNNING → DONE`.
 
 ### `POST /v1/intents`
+
+Requires the caller's user to have a linked agent. Creation returns `409`
+`agent_not_linked` otherwise: an intent stored without an agent can never satisfy
+the ownership check on any agent route, so it would be enqueued and then stall
+permanently.
 
 Create a purchase intent. Transitions immediately to `SEARCHING` and enqueues a
 search job for the agent.
@@ -128,8 +147,9 @@ search job for the agent.
 | `query` | string (1–500) | yes | Natural-language shopping query |
 | `subject` | string (1–100) | no | Short human-readable subject/title |
 | `maxBudget` | int > 0, ≤ 1,000,000 | yes | Hard cap in minor units |
-| `currency` | 3-letter ISO code | no | Defaults to `eur` |
 | `expiresAt` | ISO-8601 datetime | no | Auto-expires if no terminal state by then |
+
+Currency cannot be overridden by request data.
 
 **Request example**
 
@@ -139,10 +159,8 @@ curl -X POST http://localhost:3000/v1/intents \
   -H "X-Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
   -d '{
-    "userId": "usr_123",
     "query": "Sony WH-1000XM5 headphones",
-    "maxBudget": 30000,
-    "currency": "eur"
+    "maxBudget": 30000
   }'
 ```
 
@@ -264,8 +282,10 @@ curl -X POST http://localhost:3000/v1/approvals/cl123abc/decision \
 
 ## Agent API
 
-All `/v1/agent/*` routes require `X-Worker-Key` and should send `X-Agent-Id` so
-the agent is attributed in audit events and logs.
+Operational `/v1/agent/*` routes require `X-Agent-Key`. The verified credential
+determines the audit actor, rate-limit identity, linked user, and intent scope.
+The only exception is initial registration, which uses the server-side
+`X-Worker-Key` bootstrap secret.
 
 ### `POST /v1/agent/register`
 
@@ -274,26 +294,35 @@ types into the Telegram bot to link their account.
 
 | | |
 |---|---|
-| Auth | `X-Worker-Key` |
+| Auth | Initial registration: `X-Worker-Key`; renewal: current `X-Agent-Key` |
 | Rate limit | 3 req / 10 minutes per IP |
-| Body | `{ "agentId"?: "<existing ag_...>" }` |
+| Body | `{}` |
 
-- Omit `agentId` on first call: a fresh `ag_...` and pairing code are issued.
-- Pass an existing unlinked `agentId` to renew the pairing code (5-minute cooldown per agent).
+- Initial registration creates a fresh agent credential and returns it once.
+- Renew an unclaimed pairing code by calling the same route with `X-Agent-Key`
+  after the 5-minute per-agent cooldown. Caller-supplied agent IDs are rejected.
 
 **Response 200**
 
 ```json
-{ "agentId": "ag_abc...", "pairingCode": "K2N4PQR9", "expiresAt": "2026-04-21T10:10:00.000Z" }
+{
+  "agentId": "ag_abc...",
+  "agentKey": "agk_...",
+  "agentKeyExpiresAt": "2026-11-17T10:00:00.000Z",
+  "pairingCode": "K2N4PQR9",
+  "expiresAt": "2026-08-19T10:10:00.000Z"
+}
 ```
+
+Persist `agentKey` in the agent's secret store before continuing. It cannot be
+retrieved later. A renewal response contains only the agent ID and new pairing code.
 
 **Error table**
 
 | Status | When |
 |---|---|
-| 400 | Invalid body |
-| 401 | Missing / wrong worker key |
-| 404 | Supplied `agentId` does not exist |
+| 400 | Invalid body or caller-supplied `X-Agent-Id` |
+| 401 | Missing / wrong bootstrap key or agent key |
 | 409 | Agent is already linked to a user — registration not needed |
 | 429 | Cooldown or IP rate limit hit |
 
@@ -303,7 +332,7 @@ Resolve the `userId` an agent is paired with (poll this after signup).
 
 | | |
 |---|---|
-| Auth | `X-Worker-Key` + `X-Agent-Id` |
+| Auth | `X-Agent-Key` |
 
 **Responses**
 
@@ -314,9 +343,30 @@ Resolve the `userId` an agent is paired with (poll this after signup).
 
 | Status | When |
 |---|---|
-| 400 | Missing `X-Agent-Id` header |
-| 401 | Missing / wrong worker key |
-| 404 | Agent not found |
+| 401 | Missing, invalid, rotated, or expired agent key |
+
+### `POST /v1/agent/credential/rotate`
+
+Replace the authenticated agent's credential before it expires. The old key is
+invalid immediately; the agent ID, user link, and owned intents are preserved.
+
+| | |
+|---|---|
+| Auth | Current `X-Agent-Key` |
+
+**Response 200**
+
+```json
+{
+  "agentId": "ag_abc...",
+  "agentKey": "agk_...",
+  "agentKeyExpiresAt": "2026-11-17T10:00:00.000Z",
+  "credentialVersion": 2
+}
+```
+
+Replace the stored key atomically. A concurrent rotation returns `409`; if the
+successful response is lost, unlink and pair a new agent.
 
 ### `POST /v1/agent/quote`
 
@@ -326,7 +376,7 @@ notification to the user.
 
 | | |
 |---|---|
-| Auth | `X-Worker-Key` (+ `X-Agent-Id` for attribution) |
+| Auth | `X-Agent-Key` |
 | Valid state | Intent must be `SEARCHING` |
 
 **Request body**
@@ -350,7 +400,8 @@ notification to the user.
 | Status | When |
 |---|---|
 | 400 | Invalid input |
-| 401 | Missing / wrong worker key |
+| 401 | Missing, invalid, rotated, or expired agent key |
+| 403 | Agent is unlinked or does not own the intent |
 | 404 | Intent not found |
 | 409 | `Intent must be in SEARCHING state (current: <status>)` |
 
@@ -360,7 +411,7 @@ Poll for the user's decision and fetch checkout parameters. Safe to call in a lo
 
 | | |
 |---|---|
-| Auth | `X-Worker-Key` (+ `X-Agent-Id`) |
+| Auth | `X-Agent-Key` |
 
 **Possible responses**
 
@@ -375,7 +426,8 @@ Poll for the user's decision and fetch checkout parameters. Safe to call in a lo
 
 | Status | When |
 |---|---|
-| 401 | Missing / wrong worker key |
+| 401 | Missing, invalid, rotated, or expired agent key |
+| 403 | Agent is unlinked or does not own the intent |
 | 404 | Intent not found |
 
 ### `GET /v1/agent/card/:intentId`
@@ -387,8 +439,8 @@ merchant checkout" path.
 
 | | |
 |---|---|
-| Auth | `X-Worker-Key` (+ `X-Agent-Id`) |
-| Rate limit | 2 req / minute per `intentId` |
+| Auth | `X-Agent-Key` |
+| Rate limit | 2 req / minute per authenticated agent |
 
 **Response 200**
 
@@ -398,7 +450,8 @@ merchant checkout" path.
 
 | Status | When |
 |---|---|
-| 401 | Missing / wrong worker key |
+| 401 | Missing, invalid, rotated, or expired agent key |
+| 403 | Agent is unlinked or does not own the intent |
 | 404 | No card for intent |
 | 409 | `Card has already been revealed` |
 | 429 | Reveal rate limit hit |
@@ -410,7 +463,7 @@ Report checkout outcome. On success: settle ledger, cancel card, transition to
 
 | | |
 |---|---|
-| Auth | `X-Worker-Key` (+ `X-Agent-Id`) |
+| Auth | `X-Agent-Key` |
 | Valid state | Intent must be `CHECKOUT_RUNNING` |
 
 **Request body**
@@ -433,7 +486,8 @@ Report checkout outcome. On success: settle ledger, cancel card, transition to
 | Status | When |
 |---|---|
 | 400 | Invalid body |
-| 401 | Missing / wrong worker key |
+| 401 | Missing, invalid, rotated, or expired agent key |
+| 403 | Agent is unlinked or does not own the intent |
 | 404 | Intent not found |
 | 409 | `Intent must be in CHECKOUT_RUNNING state (current: <status>)` |
 
@@ -676,13 +730,13 @@ Every error response carries the `{ "error": string, ["details": ...] }` envelop
 | HTTP status | Typical meaning | Common triggers |
 |---|---|---|
 | 400 | Bad request — client-side problem | Missing `X-Idempotency-Key`, malformed JSON, Zod validation failure (with `details`) |
-| 401 | Unauthorized | Missing / invalid `Authorization: Bearer` key; missing / wrong `X-Worker-Key`; bad Stripe/Telegram webhook signature |
+| 401 | Unauthorized | Missing / invalid user or agent credential; bad bootstrap key; bad Stripe/Telegram webhook signature |
 | 402 | Payment required | `POST /v1/checkout/simulate` — Stripe Issuing declined (`{ success:false, declineCode, message }`) |
-| 403 | Forbidden | User API key does not own the requested resource |
+| 403 | Forbidden | User or agent credential does not own the requested resource; agent is not linked |
 | 404 | Not found | `Intent not found: <id>`, `No card found for intent: <id>`, `User not found`, `Agent not found: <id>` |
 | 409 | Conflict | Intent is in the wrong state for the operation; `Card has already been revealed`; `Agent already has a linked user` |
 | 422 | Unprocessable | `InsufficientFundsError`, `InsufficientIssuingBalanceError` |
-| 429 | Rate-limited | Global 60 req/min + per-route limits (card reveal 2/min per intent, `POST /v1/agent/register` 3/10min per IP, approvals 5/min per key) |
+| 429 | Rate-limited | Global 60 req/min + per-route limits (card reveal 2/min per agent, `POST /v1/agent/register` 3/10min, approvals 5/min per key) |
 | 500 | Server error | Unhandled exception — server logs will have a stack trace |
 
 Typed domain errors live in [`src/contracts/errors.ts`](../src/contracts/errors.ts); mapping to HTTP status is done by each route handler.
@@ -692,8 +746,8 @@ Typed domain errors live in [`src/contracts/errors.ts`](../src/contracts/errors.
 ## Integration walkthrough
 
 Full happy-path example against a local dev server. Copy and paste to verify
-your environment end-to-end. You need the dev server (`npm run dev`) and the
-stub worker (`npm run worker`) running, a seeded demo user, and its API key.
+your environment end-to-end. You need the dev server (`npm run dev`) running,
+a paired agent, a seeded demo user, and its API key.
 
 ```bash
 #!/usr/bin/env bash
@@ -701,26 +755,23 @@ set -euo pipefail
 
 BASE="http://localhost:3000"
 API_KEY="${API_KEY:?export API_KEY=<bearer token returned by Telegram signup>}"
-WORKER_KEY="${WORKER_API_KEY:-local-dev-worker-key}"
-AGENT_ID="${AGENT_ID:-ag_walkthrough}"
+AGENT_KEY="${OPENCLAW_AGENT_KEY:?export OPENCLAW_AGENT_KEY=<key returned by agent registration>}"
 
 auth_user() { printf 'Authorization: Bearer %s' "$API_KEY"; }
-auth_agent() { printf 'X-Worker-Key: %s\nX-Agent-Id: %s' "$WORKER_KEY" "$AGENT_ID"; }
 
 echo "=> 1. Create intent"
 INTENT_JSON=$(curl -sS -X POST "$BASE/v1/intents" \
   -H "Content-Type: application/json" \
   -H "X-Idempotency-Key: $(uuidgen)" \
   -H "$(auth_user)" \
-  -d '{"query":"Sony WH-1000XM5","maxBudget":30000,"currency":"eur"}')
+  -d '{"query":"Sony WH-1000XM5","maxBudget":30000}')
 echo "$INTENT_JSON" | tee /dev/stderr
 INTENT_ID=$(node -e "console.log(JSON.parse(process.argv[1]).intentId)" "$INTENT_JSON")
 
 echo "=> 2. Agent posts a quote"
 curl -sS -X POST "$BASE/v1/agent/quote" \
   -H "Content-Type: application/json" \
-  -H "X-Worker-Key: $WORKER_KEY" \
-  -H "X-Agent-Id: $AGENT_ID" \
+  -H "X-Agent-Key: $AGENT_KEY" \
   -d "{\"intentId\":\"$INTENT_ID\",\"merchantName\":\"Amazon DE\",\"merchantUrl\":\"https://amazon.de/dp/XXX\",\"price\":27999,\"currency\":\"eur\"}"
 
 echo "=> 3. User approves"
@@ -731,7 +782,7 @@ curl -sS -X POST "$BASE/v1/approvals/$INTENT_ID/decision" \
   -d '{"decision":"APPROVED"}'
 
 echo "=> 4. Agent polls decision + checkout params"
-curl -sS -H "X-Worker-Key: $WORKER_KEY" -H "X-Agent-Id: $AGENT_ID" \
+curl -sS -H "X-Agent-Key: $AGENT_KEY" \
   "$BASE/v1/agent/decision/$INTENT_ID"
 
 echo "=> 5. Agent simulates checkout"
@@ -742,8 +793,7 @@ curl -sS -X POST "$BASE/v1/checkout/simulate" \
 echo "=> 6. Agent reports result"
 curl -sS -X POST "$BASE/v1/agent/result" \
   -H "Content-Type: application/json" \
-  -H "X-Worker-Key: $WORKER_KEY" \
-  -H "X-Agent-Id: $AGENT_ID" \
+  -H "X-Agent-Key: $AGENT_KEY" \
   -d "{\"intentId\":\"$INTENT_ID\",\"success\":true,\"actualAmount\":27999}"
 
 echo "=> 7. Inspect audit trail"

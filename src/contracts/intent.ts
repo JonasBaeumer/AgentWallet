@@ -22,6 +22,7 @@ export enum IntentEvent {
 export interface PurchaseIntentData {
   id: string;
   userId: string;
+  agentId: string | null;
   query: string;
   subject: string | null;
   maxBudget: number;

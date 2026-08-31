@@ -1,7 +1,12 @@
 import { randomUUID } from 'crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { workerAuthMiddleware } from '@/api/middleware/auth';
 import { agentContextHook } from '@/api/middleware/agentContext';
+import {
+  agentAuthMiddleware,
+  agentRegistrationAuthMiddleware,
+  claimedAgentAuthMiddleware,
+  requireOwnedIntent,
+} from '@/api/middleware/agentAuth';
 import { agentQuoteSchema, agentResultSchema, agentRegisterSchema } from '@/api/validators/agent';
 import { IntentStatus } from '@/contracts';
 import {
@@ -14,6 +19,7 @@ import { settleIntent, returnIntent } from '@/ledger/potService';
 import { getProviderForIntent } from '@/payments';
 import { prisma } from '@/db/client';
 import { sendApprovalRequest } from '@/telegram/notificationService';
+import { issueAgentCredential } from '@/security/agentCredentials';
 
 const PAIRING_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const PAIRING_CODE_RENEWAL_COOLDOWN_MS = 5 * 60 * 1000; // min gap between renewals per agentId
@@ -26,17 +32,30 @@ function generatePairingCode(): string {
   ).join('');
 }
 
-export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
-  // Enrich req.log with { agentId, intentId, route } and expose req.agentId to all handlers
-  // in this plugin scope. Runs after workerAuth so auth failures short-circuit first.
-  fastify.addHook('preHandler', agentContextHook);
+/**
+ * Card reveals allowed per agent per minute, across all of its intents.
+ *
+ * This is a business limit, not a retry guard. The previous key was the intent
+ * id, which any caller could sidestep by rotating the intent; keying on the
+ * verified agent closes that. The cost is that it also bounds an agent's total
+ * checkout throughput at this number, so an agent working several intents queues
+ * behind itself. Raising it weakens the reveal ceiling, and scoping it to
+ * agent + intent reopens the bypass -- pick deliberately, and note that the
+ * single-reveal rule in the card service, not this limit, is what makes a second
+ * reveal of the same card impossible.
+ */
+const CARD_REVEAL_MAX_PER_MINUTE = 2;
 
-  // POST /v1/agent/quote — worker posts search result
+/** Bootstrap/renewal budget per agent (or per IP before an agent is known). */
+const AGENT_REGISTRATION_MAX_PER_10_MINUTES = 3;
+
+export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
+  // POST /v1/agent/quote — authenticated agent posts a search result
   // Flow: SEARCHING → QUOTED → AWAITING_APPROVAL
   fastify.post(
     '/v1/agent/quote',
     {
-      preHandler: workerAuthMiddleware,
+      preHandler: [claimedAgentAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = agentQuoteSchema.safeParse(request.body);
@@ -45,8 +64,8 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const { intentId, merchantName, merchantUrl, price, currency } = parsed.data;
-      const intent = await prisma.purchaseIntent.findUnique({ where: { id: intentId } });
-      if (!intent) return reply.status(404).send({ error: `Intent not found: ${intentId}` });
+      const intent = await requireOwnedIntent(request, reply, intentId);
+      if (!intent) return;
       if (intent.status !== IntentStatus.SEARCHING) {
         return reply
           .status(409)
@@ -54,10 +73,11 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // SEARCHING → QUOTED (stores quote data in metadata via orchestrator)
-      await receiveQuote(intentId, { merchantName, merchantUrl, price, currency }, request.agentId);
+      const agentId = request.authenticatedAgent!.id;
+      await receiveQuote(intentId, { merchantName, merchantUrl, price, currency }, agentId);
 
       // QUOTED → AWAITING_APPROVAL
-      await requestApproval(intentId, request.agentId);
+      await requestApproval(intentId, agentId);
 
       // Fire-and-forget Telegram notification — must not block the HTTP response
       sendApprovalRequest(intentId).catch((err: unknown) =>
@@ -72,13 +92,13 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  // POST /v1/agent/result — worker posts checkout outcome
+  // POST /v1/agent/result — authenticated agent posts a checkout outcome
   // Flow on success: CHECKOUT_RUNNING → DONE, settle ledger, cancel card
   // Flow on failure: CHECKOUT_RUNNING → FAILED, return ledger funds, cancel card
   fastify.post(
     '/v1/agent/result',
     {
-      preHandler: workerAuthMiddleware,
+      preHandler: [claimedAgentAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = agentResultSchema.safeParse(request.body);
@@ -87,19 +107,20 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const { intentId, success, actualAmount, receiptUrl, errorMessage } = parsed.data;
-      const intent = await prisma.purchaseIntent.findUnique({ where: { id: intentId } });
-      if (!intent) return reply.status(404).send({ error: `Intent not found: ${intentId}` });
+      const intent = await requireOwnedIntent(request, reply, intentId);
+      if (!intent) return;
       if (intent.status !== IntentStatus.CHECKOUT_RUNNING) {
         return reply
           .status(409)
           .send({ error: `Intent must be in CHECKOUT_RUNNING state (current: ${intent.status})` });
       }
 
+      const agentId = request.authenticatedAgent!.id;
       if (success) {
-        await completeCheckout(intentId, actualAmount ?? 0, request.agentId);
+        await completeCheckout(intentId, actualAmount ?? 0, agentId);
         await settleIntent(intentId, actualAmount ?? 0);
       } else {
-        await failCheckout(intentId, errorMessage ?? 'Checkout failed', request.agentId);
+        await failCheckout(intentId, errorMessage ?? 'Checkout failed', agentId);
         await returnIntent(intentId);
       }
 
@@ -135,16 +156,13 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{ Params: { intentId: string } }>(
     '/v1/agent/decision/:intentId',
     {
-      preHandler: workerAuthMiddleware,
+      preHandler: [claimedAgentAuthMiddleware, agentContextHook],
     },
     async (request, reply) => {
       const { intentId } = request.params;
 
-      const intent = await prisma.purchaseIntent.findUnique({
-        where: { id: intentId },
-        include: { virtualCard: true },
-      });
-      if (!intent) return reply.status(404).send({ error: `Intent not found: ${intentId}` });
+      const intent = await requireOwnedIntent(request, reply, intentId);
+      if (!intent) return;
 
       switch (intent.status) {
         case IntentStatus.AWAITING_APPROVAL:
@@ -184,18 +202,21 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
     {
       config: {
         rateLimit: {
-          max: 2,
+          // preHandler so the key can see the identity established by the route's
+          // own auth hook; the global onRequest limiter has already shed floods.
+          hook: 'preHandler',
+          max: CARD_REVEAL_MAX_PER_MINUTE,
           timeWindow: '1 minute',
-          keyGenerator: (req: FastifyRequest) => {
-            const intentId = (req.params as { intentId: string }).intentId ?? '';
-            return `card-reveal:${intentId}`;
-          },
+          keyGenerator: (req: FastifyRequest) =>
+            `card-reveal:${req.authenticatedAgent?.id ?? 'unauthenticated'}`,
         },
       },
-      preHandler: workerAuthMiddleware,
+      preHandler: [claimedAgentAuthMiddleware, agentContextHook],
     },
     async (request, reply) => {
       const { intentId } = request.params;
+      const intent = await requireOwnedIntent(request, reply, intentId);
+      if (!intent) return;
 
       try {
         const provider = await getProviderForIntent(intentId);
@@ -213,20 +234,24 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
     },
   );
 
-  // POST /v1/agent/register — register OpenClaw instance and get a pairing code
-  // Body: { agentId?: string }  — omit on first call; pass existing agentId to renew code
-  // Returns: { agentId, pairingCode, expiresAt }
+  // POST /v1/agent/register — bootstrap a new agent or renew its pairing code.
+  // Bootstrap uses X-Worker-Key and returns X-Agent-Key material once. Renewal
+  // requires the existing X-Agent-Key and never trusts a caller-supplied agent ID.
   fastify.post(
     '/v1/agent/register',
     {
       config: {
         rateLimit: {
-          max: 3,
+          hook: 'preHandler',
+          max: AGENT_REGISTRATION_MAX_PER_10_MINUTES,
           timeWindow: '10 minutes',
-          keyGenerator: (req: FastifyRequest) => req.ip ?? 'unknown',
+          keyGenerator: (req: FastifyRequest) =>
+            req.authenticatedAgent?.id
+              ? `agent-registration:${req.authenticatedAgent.id}`
+              : (req.ip ?? 'unknown'),
         },
       },
-      preHandler: workerAuthMiddleware,
+      preHandler: [agentRegistrationAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = agentRegisterSchema.safeParse(request.body);
@@ -234,25 +259,26 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Invalid input', details: parsed.error.errors });
       }
 
-      const { agentId: existingAgentId } = parsed.data;
       const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_MS);
       const code = generatePairingCode();
 
-      if (existingAgentId) {
-        // Renewal: look up existing record by agentId
+      if (request.authenticatedAgent) {
+        const agentId = request.authenticatedAgent.id;
         const existing = await prisma.pairingCode.findUnique({
-          where: { agentId: existingAgentId },
+          where: { agentId },
         });
         if (!existing) {
-          return reply.status(404).send({ error: `Agent not found: ${existingAgentId}` });
+          return reply.status(401).send({
+            error: 'Unauthorized: invalid or rotated agent credential',
+            code: 'agent_credential_invalid',
+          });
         }
         if (existing.claimedByUserId) {
           return reply
             .status(409)
             .send({ error: 'Agent already has a linked user — re-registration not needed' });
         }
-        // Per-agentId rate limit: use createdAt (set at issuance) to measure the cooldown
-        const lastIssuedAt = existing.createdAt.getTime();
+        const lastIssuedAt = existing.codeIssuedAt.getTime();
         if (Date.now() - lastIssuedAt < PAIRING_CODE_RENEWAL_COOLDOWN_MS) {
           return reply.status(429).send({
             error: 'Too many renewal requests for this agent — please wait before retrying',
@@ -260,8 +286,8 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
         }
         // Issue a fresh code
         const updated = await prisma.pairingCode.update({
-          where: { agentId: existingAgentId },
-          data: { code, expiresAt },
+          where: { agentId },
+          data: { code, expiresAt, codeIssuedAt: new Date() },
         });
         return reply.send({
           agentId: updated.agentId,
@@ -270,42 +296,104 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      // First registration: generate a stable agentId
+      if (request.headers['x-agent-id']) {
+        return reply.status(400).send({
+          error: 'X-Agent-Id is not accepted during initial registration',
+          code: 'untrusted_agent_id',
+        });
+      }
+
       const agentId = `ag_${randomUUID().replace(/-/g, '')}`;
+      const credential = await issueAgentCredential();
       const record = await prisma.pairingCode.create({
-        data: { agentId, code, expiresAt },
+        data: {
+          agentId,
+          code,
+          expiresAt,
+          codeIssuedAt: new Date(),
+          credentialHash: credential.hash,
+          credentialPrefix: credential.prefix,
+          credentialExpiresAt: credential.expiresAt,
+          credentialVersion: 1,
+          credentialRevokedAt: null,
+        },
       });
       return reply.send({
         agentId: record.agentId,
         pairingCode: record.code,
         expiresAt: record.expiresAt,
+        agentKey: credential.raw,
+        agentKeyExpiresAt: credential.expiresAt,
       });
     },
   );
 
-  // GET /v1/agent/user — resolve the userId linked to an agentId
-  // Header: X-Agent-Id: <agentId>
+  fastify.post(
+    '/v1/agent/credential/rotate',
+    {
+      preHandler: [agentAuthMiddleware, agentContextHook],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const agent = request.authenticatedAgent!;
+      const credential = await issueAgentCredential();
+
+      const rotated = await prisma.$transaction(async (tx) => {
+        const result = await tx.pairingCode.updateMany({
+          where: {
+            agentId: agent.id,
+            credentialVersion: agent.credentialVersion,
+            credentialRevokedAt: null,
+          },
+          data: {
+            credentialHash: credential.hash,
+            credentialPrefix: credential.prefix,
+            credentialExpiresAt: credential.expiresAt,
+            credentialVersion: { increment: 1 },
+          },
+        });
+        if (result.count !== 1) return false;
+
+        await tx.auditEvent.create({
+          data: {
+            intentId: null,
+            actor: agent.id,
+            agentId: agent.id,
+            event: 'AGENT_CREDENTIAL_ROTATED',
+            payload: { credentialVersion: agent.credentialVersion + 1 },
+          },
+        });
+        return true;
+      });
+
+      if (!rotated) {
+        return reply.status(409).send({
+          error: 'Agent credential was rotated by another request',
+          code: 'agent_credential_rotation_conflict',
+        });
+      }
+
+      return reply.send({
+        agentId: agent.id,
+        agentKey: credential.raw,
+        agentKeyExpiresAt: credential.expiresAt,
+        credentialVersion: agent.credentialVersion + 1,
+      });
+    },
+  );
+
+  // GET /v1/agent/user — resolve the user linked to the authenticated agent
   // Returns: { status: "unclaimed" } | { status: "claimed", userId }
   fastify.get(
     '/v1/agent/user',
     {
-      preHandler: workerAuthMiddleware,
+      preHandler: [agentAuthMiddleware, agentContextHook],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const agentId = request.agentId;
-      if (!agentId) {
-        return reply.status(400).send({ error: 'Missing X-Agent-Id header' });
-      }
-
-      const record = await prisma.pairingCode.findUnique({ where: { agentId } });
-      if (!record) {
-        return reply.status(404).send({ error: `Agent not found: ${agentId}` });
-      }
-
-      if (!record.claimedByUserId) {
+      const agent = request.authenticatedAgent!;
+      if (!agent.userId) {
         return reply.send({ status: 'unclaimed' });
       }
-      return reply.send({ status: 'claimed', userId: record.claimedByUserId });
+      return reply.send({ status: 'claimed', userId: agent.userId });
     },
   );
 }

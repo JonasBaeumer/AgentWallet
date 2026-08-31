@@ -89,22 +89,25 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
       payload: {},
     });
     expect(regRes.statusCode).toBe(200);
-    const { agentId, pairingCode, expiresAt } = regRes.json();
+    const { agentId, pairingCode, expiresAt, agentKey } = regRes.json();
     expect(agentId).toMatch(/^ag_/);
     expect(pairingCode).toMatch(/^[A-Z0-9]{8}$/);
     expect(new Date(expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(agentKey).toMatch(/^agk_/);
 
     // Verify pairing code is persisted in DB
     const dbCode = await prisma.pairingCode.findUnique({ where: { agentId } });
     expect(dbCode).not.toBeNull();
     expect(dbCode!.code).toBe(pairingCode);
     expect(dbCode!.claimedByUserId).toBeNull();
+    expect(dbCode!.credentialHash).not.toBe(agentKey);
+    expect(await bcrypt.compare(agentKey, dbCode!.credentialHash!)).toBe(true);
 
     // Step 2: GET /v1/agent/user — should be unclaimed
     const beforeRes = await app.inject({
       method: 'GET',
       url: '/v1/agent/user',
-      headers: { 'x-worker-key': WORKER_KEY, 'x-agent-id': agentId },
+      headers: { 'x-agent-key': agentKey },
     });
     expect(beforeRes.statusCode).toBe(200);
     expect(beforeRes.json().status).toBe('unclaimed');
@@ -195,7 +198,7 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     const afterRes = await app.inject({
       method: 'GET',
       url: '/v1/agent/user',
-      headers: { 'x-worker-key': WORKER_KEY, 'x-agent-id': agentId },
+      headers: { 'x-agent-key': agentKey },
     });
     expect(afterRes.statusCode).toBe(200);
     const { status: claimedStatus, userId } = afterRes.json();
@@ -233,6 +236,7 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     const intent = await prisma.purchaseIntent.findUnique({ where: { id: intentId } });
     expect(intent).not.toBeNull();
     expect(intent!.userId).toBe(userId);
+    expect(intent!.agentId).toBe(agentId);
     expect(intent!.status).toBe('SEARCHING');
   });
 
@@ -244,21 +248,21 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
       headers: { 'x-worker-key': WORKER_KEY },
       payload: {},
     });
-    const { agentId, pairingCode: firstCode } = reg1.json();
+    const { agentId, pairingCode: firstCode, agentKey } = reg1.json();
 
-    // Backdate createdAt so the 5-minute per-agentId renewal cooldown is satisfied
+    // Backdate codeIssuedAt so the per-agent renewal cooldown is satisfied
     // (simulate that the original code was issued 6 minutes ago)
     await prisma.pairingCode.update({
       where: { agentId },
-      data: { createdAt: new Date(Date.now() - 6 * 60 * 1000) },
+      data: { codeIssuedAt: new Date(Date.now() - 6 * 60 * 1000) },
     });
 
     // Renew
     const reg2 = await app.inject({
       method: 'POST',
       url: '/v1/agent/register',
-      headers: { 'x-worker-key': WORKER_KEY },
-      payload: { agentId },
+      headers: { 'x-agent-key': agentKey },
+      payload: {},
     });
     expect(reg2.statusCode).toBe(200);
     const { agentId: sameAgentId, pairingCode: newCode } = reg2.json();
@@ -280,7 +284,7 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
       headers: { 'x-worker-key': WORKER_KEY },
       payload: {},
     });
-    const { agentId, pairingCode } = reg.json();
+    const { pairingCode, agentKey } = reg.json();
 
     // Simulate user claiming via Telegram (including the new confirmation step)
     const chatId = 77776666;
@@ -326,8 +330,8 @@ testSuite('OpenClaw onboarding + first purchase intent (real DB + Redis)', () =>
     const renewRes = await app.inject({
       method: 'POST',
       url: '/v1/agent/register',
-      headers: { 'x-worker-key': WORKER_KEY },
-      payload: { agentId },
+      headers: { 'x-agent-key': agentKey },
+      payload: {},
     });
     expect(renewRes.statusCode).toBe(409);
   });

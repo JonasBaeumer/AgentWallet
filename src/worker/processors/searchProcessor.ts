@@ -6,7 +6,7 @@ import { logger } from '@/config/logger';
 const log = logger.child({ module: 'worker/processors/searchProcessor' });
 
 const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
-const WORKER_KEY = process.env.WORKER_API_KEY || 'local-dev-worker-key';
+const AGENT_KEY = process.env.OPENCLAW_AGENT_KEY;
 
 export function createSearchWorker(): Worker {
   return new Worker(
@@ -15,12 +15,16 @@ export function createSearchWorker(): Worker {
       const { intentId, maxBudget, currency } = job.data;
       log.info({ intentId }, 'Processing search job');
 
+      if (!AGENT_KEY) {
+        throw new Error('OPENCLAW_AGENT_KEY is required by the stub search worker');
+      }
+
       // Post a stub quote immediately
       const response = await fetch(`${API_BASE}/v1/agent/quote`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Worker-Key': WORKER_KEY,
+          'X-Agent-Key': AGENT_KEY,
         },
         body: JSON.stringify({
           intentId,
