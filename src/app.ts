@@ -9,6 +9,7 @@ import { debugRoutes } from '@/api/routes/debug';
 import { telegramRoutes } from '@/api/routes/telegram';
 import { checkoutRoutes } from '@/api/routes/checkout';
 import { usersRoutes } from '@/api/routes/users';
+import { cryptoWalletRoutes } from '@/api/routes/cryptoWallet';
 
 export function buildApp() {
   const fastify = Fastify({
@@ -76,6 +77,7 @@ export function buildApp() {
     fastify.register(telegramRoutes);
     fastify.register(checkoutRoutes);
     fastify.register(usersRoutes);
+    fastify.register(cryptoWalletRoutes);
 
     fastify.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
   });

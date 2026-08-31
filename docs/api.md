@@ -517,6 +517,45 @@ Receives Telegram bot updates (messages, callback queries).
 
 ---
 
+## Crypto wallet onboarding
+
+All onboarding routes require the authenticated AgentWallet customer's bearer
+key. They are fixed to Base Sepolia (`84532`).
+
+### `GET /v1/crypto/wallet`
+
+Returns the current customer's public Smart Account, executor, and latest stored
+Spend Permission state. Backend CDP credentials and customer access tokens are
+never returned.
+
+### `POST /v1/crypto/wallet/bind`
+
+Validates a short-lived CDP User Wallet access token server-side and binds the
+verified Smart Account to the authenticated AgentWallet customer.
+
+```json
+{
+  "accessToken": "<short-lived-cdp-access-token>",
+  "smartAccountAddress": "0x..."
+}
+```
+
+| Status | When |
+|---|---|
+| 200 | Verified wallet bound or idempotently reconnected |
+| 400 | Invalid request shape |
+| 401 | AgentWallet credential or CDP session is invalid |
+| 409 | CDP identity/address belongs to another customer or conflicts with the existing binding |
+| 502 | Coinbase token validation is temporarily unavailable |
+| 503 | Crypto onboarding is disabled |
+
+### `POST /v1/crypto/wallet/disconnect`
+
+Marks the wallet `CLOSED` without removing its identity or audit history. Returns
+`409` while an active stored permission or nonterminal crypto payment exists.
+
+---
+
 ## Users
 
 ### `GET /v1/users/me`

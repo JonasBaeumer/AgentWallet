@@ -83,3 +83,49 @@ export class CryptoPaymentTransitionConflictError extends Error {
     this.name = 'CryptoPaymentTransitionConflictError';
   }
 }
+
+export class CryptoFeatureDisabledError extends Error {
+  constructor() {
+    super('Crypto wallet onboarding is disabled');
+    this.name = 'CryptoFeatureDisabledError';
+  }
+}
+
+export class CdpSessionValidationError extends Error {
+  constructor(public readonly reason: 'invalid_session' | 'provider_unavailable') {
+    super(
+      reason === 'invalid_session'
+        ? 'The Coinbase wallet session is invalid or expired'
+        : 'Coinbase wallet verification is temporarily unavailable',
+    );
+    this.name = 'CdpSessionValidationError';
+  }
+}
+
+export class CryptoWalletAlreadyBoundError extends Error {
+  constructor() {
+    super('This Coinbase wallet is already bound to another AgentWallet customer');
+    this.name = 'CryptoWalletAlreadyBoundError';
+  }
+}
+
+export class CryptoWalletIdentityMismatchError extends Error {
+  constructor() {
+    super('The authenticated customer is already bound to a different Coinbase wallet');
+    this.name = 'CryptoWalletIdentityMismatchError';
+  }
+}
+
+export class CryptoWalletDisconnectBlockedError extends Error {
+  constructor() {
+    super('Revoke active permissions and finish pending crypto payments before disconnecting');
+    this.name = 'CryptoWalletDisconnectBlockedError';
+  }
+}
+
+export class CryptoWalletNotFoundError extends Error {
+  constructor() {
+    super('No Coinbase wallet is bound to this customer');
+    this.name = 'CryptoWalletNotFoundError';
+  }
+}
