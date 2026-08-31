@@ -1,5 +1,4 @@
-import type { Event } from 'stripe/cjs/resources/Events';
-import type { Authorization, Transaction } from 'stripe/cjs/resources/Issuing';
+import type { IssuingAuthorization, IssuingTransaction, StripeEvent } from './stripeTypes';
 import { getStripeClient } from './stripeClient';
 import { cancelCard } from './cardService';
 import { prisma } from '@/db/client';
@@ -16,7 +15,7 @@ export async function handleStripeEvent(
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) throw new Error('STRIPE_WEBHOOK_SECRET not set');
 
-  let event: Event;
+  let event: StripeEvent;
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
   } catch (err) {
@@ -31,7 +30,7 @@ export async function handleStripeEvent(
       // Return { approved: true } in the response body — the approve/decline
       // endpoints are deprecated; Stripe now reads the decision from the HTTP
       // response body within the 2-second window.
-      const auth = event.data.object as Authorization;
+      const auth = event.data.object as IssuingAuthorization;
       await logAuditEvent(intentId, 'STRIPE_AUTHORIZATION_REQUEST', {
         authId: auth.id,
         amount: auth.amount,
@@ -40,7 +39,7 @@ export async function handleStripeEvent(
     }
 
     case 'issuing_authorization.created': {
-      const auth = event.data.object as Authorization;
+      const auth = event.data.object as IssuingAuthorization;
       await logAuditEvent(intentId, 'STRIPE_AUTHORIZATION_CREATED', {
         authId: auth.id,
         amount: auth.amount,
@@ -49,7 +48,7 @@ export async function handleStripeEvent(
     }
 
     case 'issuing_transaction.created': {
-      const txn = event.data.object as Transaction;
+      const txn = event.data.object as IssuingTransaction;
       await logAuditEvent(intentId, 'STRIPE_TRANSACTION_CREATED', {
         transactionId: txn.id,
         amount: txn.amount,

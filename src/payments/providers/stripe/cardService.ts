@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import type { Card, Cardholder } from 'stripe/cjs/resources/Issuing';
+import type { IssuingCard, IssuingCardholder } from './stripeTypes';
 import { getStripeClient } from './stripeClient';
 import { buildSpendingControls } from './spendingControls';
 import { prisma } from '@/db/client';
@@ -38,7 +38,7 @@ export async function issueVirtualCard(
   if (intent.user.providerCardholderId) {
     cardholderId = intent.user.providerCardholderId;
   } else {
-    let newCardholder: Cardholder;
+    let newCardholder: IssuingCardholder;
     try {
       newCardholder = await stripe.issuing.cardholders.create({
         name: 'Agent Buyer',
@@ -75,7 +75,7 @@ export async function issueVirtualCard(
 
   // Create virtual card with intentId as idempotency key.
   // metadata.intentId is set so Stripe webhook events can be correlated back to this intent.
-  let stripeCard: Card;
+  let stripeCard: IssuingCard;
   try {
     stripeCard = await stripe.issuing.cards.create(
       {
@@ -120,7 +120,7 @@ export async function revealCard(intentId: string): Promise<CardReveal> {
   if (card.revealedAt) throw new CardAlreadyRevealedError(intentId);
 
   // Retrieve card with expanded number and CVC (test mode only)
-  let stripeCard: Card;
+  let stripeCard: IssuingCard;
   try {
     stripeCard = await stripe.issuing.cards.retrieve(card.providerCardId, {
       expand: ['number', 'cvc'],

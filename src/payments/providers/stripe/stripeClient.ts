@@ -1,9 +1,9 @@
 import Stripe from 'stripe';
-import type { Stripe as StripeTypes } from 'stripe/cjs/stripe.core';
+import type { StripeClient } from './stripeTypes';
 
-let _stripe: StripeTypes | null = null;
+let _stripe: StripeClient | null = null;
 
-export function getStripeClient(): StripeTypes {
+export function getStripeClient(): StripeClient {
   if (!_stripe) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (!key) throw new Error('STRIPE_SECRET_KEY env var is not set');
