@@ -378,7 +378,7 @@ reservation, and cancels the virtual card.
 |-------|------|----------|-------------|
 | `intentId` | `string` | Yes | Must match an intent in `CHECKOUT_RUNNING` state |
 | `success` | `boolean` | Yes | `true` = purchase completed, `false` = purchase failed |
-| `actualAmount` | `integer` | No | Actual amount charged, smallest currency unit; include on success |
+| `actualAmount` | `integer` | On success | Actual amount charged, smallest currency unit; must not exceed the reserved amount |
 | `receiptUrl` | `string` | No | URL of the order confirmation page; include on success |
 | `errorMessage` | `string` | No | Human-readable failure reason; include on failure |
 
@@ -423,6 +423,7 @@ or on failure:
 | `401` | Missing or wrong `X-Worker-Key` |
 | `404` | `intentId` not found |
 | `409` | Intent is not in `CHECKOUT_RUNNING` state |
+| `422` | `actualAmount` exceeds the reserved amount — over-capture reports are rejected; the intent stays `CHECKOUT_RUNNING`, submit a corrected report |
 
 ---
 

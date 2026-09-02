@@ -85,4 +85,17 @@ describe('agentResultSchema', () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it('rejects success without actualAmount', () => {
+    const result = agentResultSchema.safeParse({ intentId: 'i-1', success: true });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toEqual(['actualAmount']);
+    }
+  });
+
+  it('accepts failure without actualAmount', () => {
+    const result = agentResultSchema.safeParse({ intentId: 'i-1', success: false });
+    expect(result.success).toBe(true);
+  });
 });

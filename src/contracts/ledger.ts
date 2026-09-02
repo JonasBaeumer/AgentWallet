@@ -32,3 +32,12 @@ export class InsufficientFundsError extends Error {
     this.name = 'InsufficientFundsError';
   }
 }
+
+export class OverCaptureError extends Error {
+  constructor(intentId: string, reservedAmount: number, actualAmount: number) {
+    super(
+      `Cannot settle intent ${intentId}: actualAmount ${actualAmount} exceeds reserved amount ${reservedAmount}`,
+    );
+    this.name = 'OverCaptureError';
+  }
+}

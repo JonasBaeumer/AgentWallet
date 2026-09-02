@@ -5,6 +5,7 @@ import {
   PotData,
   InsufficientFundsError,
   IntentNotFoundError,
+  OverCaptureError,
   UserNotFoundError,
 } from '@/contracts';
 import { logger } from '@/config/logger';
@@ -65,6 +66,13 @@ export async function settleIntent(intentId: string, actualAmount: number): Prom
   await prisma.$transaction(async (tx) => {
     const pot = await tx.pot.findUnique({ where: { intentId } });
     if (!pot) throw new IntentNotFoundError(intentId);
+
+    // The virtual card's network-level spending limit means a capture above the
+    // reservation cannot legitimately happen — refuse to book one (defense in
+    // depth: the /v1/agent/result route rejects this before calling us).
+    if (actualAmount > pot.reservedAmount) {
+      throw new OverCaptureError(intentId, pot.reservedAmount, actualAmount);
+    }
 
     const intent = await tx.purchaseIntent.findUnique({
       where: { id: intentId },

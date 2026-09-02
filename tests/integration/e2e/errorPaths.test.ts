@@ -270,7 +270,7 @@ describe('State transition guards', () => {
       method: 'POST',
       url: '/v1/agent/result',
       headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
-      body: JSON.stringify({ intentId: 'i1', success: true }),
+      body: JSON.stringify({ intentId: 'i1', success: true, actualAmount: 100 }),
     });
     expect(res.statusCode).toBe(409);
   });
