@@ -257,7 +257,7 @@ Every purchase is a `PurchaseIntent` tracked through an explicit state machine. 
 
 ### Prerequisites
 
-- **Node.js** 18+
+- **Node.js** 20+ (the MCP SDK's dependency tree requires `>=20`; CI runs Node 20)
 - **Docker** (for Postgres + Redis)
 - **Stripe account** with Issuing enabled — see [docs/stripe-setup.md](docs/stripe-setup.md) for the full walkthrough
 - **Telegram bot token** (optional) — for approval notifications and user signup; see [docs/telegram-setup.md](docs/telegram-setup.md)
@@ -441,18 +441,36 @@ curl http://localhost:3000/v1/debug/ledger/USER_ID
 
 ---
 
-## OpenClaw Agent Integration
+## Agent Integration (MCP)
 
-For the full agent integration guide — including registration, pairing, the decision polling loop, and the complete API contract — see [docs/openclaw.md](docs/openclaw.md).
+Agents integrate via the **MCP server** at `/mcp` (Streamable HTTP): seven tools covering
+registration, pairing, intent creation, quoting, approval polling, one-time card reveal,
+and result reporting, with the workflow rules delivered as server instructions during the
+MCP handshake. See [docs/mcp.md](docs/mcp.md) for client setup and the tool reference.
 
-The key design principle: **OpenClaw never handles raw card credentials**. The decision endpoint returns exactly what the simulate endpoint needs:
+For non-MCP integrations, the underlying REST contract — registration, pairing, the
+decision polling loop, and the complete API reference — is documented in
+[docs/openclaw.md](docs/openclaw.md).
 
-```
-GET  /v1/agent/decision/:intentId  →  { checkout: { intentId, amount, currency } }
-POST /v1/checkout/simulate         ←  { intentId, amount, currency, merchantName }
-```
+Card credential handling depends on the checkout path:
 
-The server resolves the Stripe card internally via the `intentId → VirtualCard → stripeCardId` lookup.
+- **Simulated checkout** (`/v1/checkout/simulate`): the agent never sees card credentials.
+  The decision endpoint returns exactly what the simulate endpoint needs, and the server
+  resolves the Stripe card internally via the `intentId → VirtualCard → stripeCardId` lookup:
+
+  ```text
+  GET  /v1/agent/decision/:intentId  →  { checkout: { intentId, amount, currency } }
+  POST /v1/checkout/simulate         ←  { intentId, amount, currency, merchantName }
+  ```
+
+- **Real merchant checkout** (`reveal_card` tool / `GET /v1/agent/card/:intentId`): the agent
+  receives the virtual card PAN and CVC **exactly once** to fill the merchant's payment form.
+  The card is single-use with a spending limit equal to the intent's `maxBudget` (the
+  approved budget — the quoted price may be lower), credentials are
+  held in working memory only (never logged or persisted, per the server instructions), and
+  the card is cancelled when the result is reported. What stays hidden from the agent at all
+  times are the user's **real** bank and card details — the virtual card is the isolation
+  boundary.
 
 ---
 
@@ -582,7 +600,7 @@ Integration tests are skipped automatically when `STRIPE_SECRET_KEY` is not a `s
 
 | Concern | Mitigation |
 |---------|-----------|
-| Raw card PAN/CVC exposure | Never stored in DB or logs. `VirtualCard` holds only `stripeCardId` + `last4`. Agent receives only `intentId`. |
+| Raw card PAN/CVC exposure | Never stored in DB or logs. `VirtualCard` holds only `stripeCardId` + `last4`. The agent obtains PAN/CVC only through the one-time reveal (`reveal_card` / `GET /v1/agent/card/:intentId`), held in working memory and never logged or persisted; the simulated-checkout path exposes no credentials at all. |
 | Overspending | Stripe Issuing `spending_limits: [{ amount, interval: 'per_authorization' }]` enforced at the card network level. |
 | One-time card use | Card is cancelled immediately after checkout succeeds or fails. |
 | Double-spending | `revealedAt` prevents a second card reveal; `settleIntent` / `returnIntent` are idempotent. |

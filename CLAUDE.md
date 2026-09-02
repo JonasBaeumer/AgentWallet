@@ -76,7 +76,7 @@ Stripe webhooks ───┘          │
 |--------|-----------|-------------|
 | Contracts | `src/contracts/` | Shared TypeScript types/interfaces — source of truth |
 | DB | `prisma/`, `src/db/` | Schema, migrations, Prisma client |
-| API Gateway | `src/api/`, `src/app.ts`, `src/server.ts` | Fastify routes, middleware, validators |
+| API Gateway | `src/api/`, `src/app.ts`, `src/server.ts` | Fastify routes, middleware, validators, MCP endpoint (`src/api/mcp/`) |
 | Orchestrator | `src/orchestrator/` | PurchaseIntent state machine |
 | Payments | `src/payments/` | Stripe Issuing card lifecycle |
 | Policy + Ledger | `src/policy/`, `src/approval/`, `src/ledger/` | Rules engine, approvals, Monzo pots |
