@@ -140,7 +140,7 @@ Content-Type: application/json
 | `query` | Yes | What to buy (1–500 chars) |
 | `subject` | No | Short label (1–100 chars) |
 | `maxBudget` | Yes | Maximum spend in smallest currency unit. Positive integer, max `1000000` (€10,000). If the user didn't specify a budget, ask them. |
-| `currency` | No | 3-letter ISO code. Defaults to `"eur"`. **Always pass explicitly** — the quote endpoint defaults to `"gbp"`, so omitting on both causes a mismatch. |
+| `currency` | No | 3-letter ISO code. Defaults to `"eur"`. This becomes the intent's currency — the quote endpoint inherits it automatically. |
 
 Response (`201`):
 ```json
@@ -188,7 +188,7 @@ Content-Type: application/json
 | `merchantName` | Yes | Retailer display name |
 | `merchantUrl` | Yes | Must be a valid URL |
 | `price` | Yes | Positive integer, smallest currency unit |
-| `currency` | No | Defaults to `"gbp"`. **Always pass explicitly** — must match the currency used in Step 1. |
+| `currency` | No | No default — omit to inherit the intent's currency from Step 1 (recommended). If passed, it must match the intent's currency (case-insensitive) or the API returns `409`. |
 
 Response (`200`):
 ```json

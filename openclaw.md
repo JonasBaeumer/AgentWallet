@@ -153,7 +153,7 @@ the user a Telegram notification with an approve/reject button.
 | `merchantName` | `string` | Yes | Non-empty display name of the retailer |
 | `merchantUrl` | `string` | Yes | Direct product URL (valid URL) |
 | `price` | `integer` | Yes | Positive integer, smallest currency unit |
-| `currency` | `string` | No | 3-letter ISO code, lowercase; default `gbp` |
+| `currency` | `string` | No | 3-letter ISO code; must match the intent's currency (case-insensitive) if supplied. Omit to inherit the intent's currency. No default. |
 
 ```json
 {
@@ -179,6 +179,7 @@ the user a Telegram notification with an approve/reject button.
 | `401` | Missing or wrong `X-Worker-Key` |
 | `404` | `intentId` not found |
 | `409` | Intent is not in `SEARCHING` state |
+| `409` | `currency` does not match the intent's currency |
 
 Do not post another quote for the same `intentId`. The user is now deciding.
 
