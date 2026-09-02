@@ -56,12 +56,14 @@ without extra prompt engineering.
 ## Tools
 
 The seven tools map 1:1 onto the agent purchase flow. Every call delegates
-internally to the corresponding REST route, so validation, state-machine rules,
-rate limits, idempotency, and audit logging are identical to REST. The MCP
-boundary additionally validates arguments before delegating and is stricter in
-two places: unknown argument properties are rejected (`additionalProperties:
+internally to the corresponding REST route: state-machine rules, rate limits,
+idempotency, and audit logging are the REST behavior, unchanged. Argument
+validation happens twice — the MCP boundary validates before delegating, then
+the route validates again — and the MCP layer is deliberately stricter in two
+places: unknown argument properties are rejected (`additionalProperties:
 false`; the REST schemas strip them), and `report_result` requires
-`actualAmount` when `success` is true (REST permits omitting it).
+`actualAmount` when `success` is true (REST permits omitting it). The
+divergences are pinned by `tests/unit/api/mcpRestDrift.test.ts`.
 
 | Tool | Wraps | Notes |
 |---|---|---|
