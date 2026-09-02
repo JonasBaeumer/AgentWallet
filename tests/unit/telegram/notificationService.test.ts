@@ -88,6 +88,22 @@ describe('sendApprovalRequest', () => {
     expect(text).not.toContain('Buy Sony WH-1000XM5');
   });
 
+  it('labels price and budget from intent.currency, ignoring poisoned metadata.currency (issue #220)', async () => {
+    mockPrismaIntentFindUnique.mockResolvedValue(
+      makeIntent({
+        currency: 'gbp',
+        metadata: { merchantName: 'Amazon UK', price: 5000, currency: 'usd' },
+      }),
+    );
+
+    await sendApprovalRequest('intent-1');
+
+    const text = mockSendMessage.mock.calls[0][1] as string;
+    expect(text).toContain('50.00 GBP');
+    expect(text).toContain('300.00 GBP');
+    expect(text).not.toContain('USD');
+  });
+
   it('does NOT send message when user has no telegramChatId', async () => {
     mockPrismaIntentFindUnique.mockResolvedValue(makeIntent({ user: { telegramChatId: null } }));
 

@@ -5,7 +5,10 @@ export const agentQuoteSchema = z.object({
   merchantName: z.string().min(1),
   merchantUrl: z.string().url(),
   price: z.number().int().positive(),
-  currency: z.string().length(3).default('eur'),
+  // Optional on purpose: omitted = inherit intent.currency; if supplied it must
+  // match intent.currency (enforced in the route). No default — a defaulted
+  // value that mismatches the intent would still be a mismatch (issue #220).
+  currency: z.string().length(3).optional(),
 });
 
 export const agentResultSchema = z.object({

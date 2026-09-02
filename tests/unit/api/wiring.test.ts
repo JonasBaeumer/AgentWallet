@@ -417,6 +417,77 @@ describe('POST /v1/agent/quote wiring', () => {
     expect(mockRequestApproval).not.toHaveBeenCalled();
   });
 
+  it('rejects quote whose currency does not match intent.currency (issue #220)', async () => {
+    seedSearchingIntent('intent-q-mismatch'); // intent currency: gbp
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      body: JSON.stringify({
+        intentId: 'intent-q-mismatch',
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 5000,
+        currency: 'usd',
+      }),
+    });
+
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body);
+    expect(body.error).toContain('usd');
+    expect(body.error).toContain('gbp');
+    expect(mockReceiveQuote).not.toHaveBeenCalled();
+    expect(mockRequestApproval).not.toHaveBeenCalled();
+  });
+
+  it('accepts quote with omitted currency and persists intent.currency (issue #220)', async () => {
+    seedSearchingIntent('intent-q-inherit'); // intent currency: gbp
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      body: JSON.stringify({
+        intentId: 'intent-q-inherit',
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 5000,
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockReceiveQuote).toHaveBeenCalledWith(
+      'intent-q-inherit',
+      expect.objectContaining({ currency: 'gbp' }),
+      undefined,
+    );
+  });
+
+  it('accepts quote currency matching intent.currency case-insensitively (issue #220)', async () => {
+    seedSearchingIntent('intent-q-case'); // intent currency: gbp
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/quote',
+      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      body: JSON.stringify({
+        intentId: 'intent-q-case',
+        merchantName: 'Amazon UK',
+        merchantUrl: 'https://amazon.co.uk',
+        price: 5000,
+        currency: 'GBP',
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockReceiveQuote).toHaveBeenCalledWith(
+      'intent-q-case',
+      expect.objectContaining({ currency: 'gbp' }),
+      undefined,
+    );
+  });
+
   it('fires sendApprovalRequest after requestApproval succeeds', async () => {
     seedSearchingIntent('intent-q3');
 
