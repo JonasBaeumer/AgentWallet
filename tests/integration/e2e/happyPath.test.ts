@@ -296,7 +296,8 @@ describe('Happy path: RECEIVED → DONE', () => {
         'x-idempotency-key': 'hp-idem-1',
         authorization: authHeader,
       },
-      body: JSON.stringify({ query: 'Sony WH-1000XM5', maxBudget: 30000, currency: 'gbp' }),
+      // currency here is advisory — the server derives it from the user's payment provider (eur for Stripe)
+      body: JSON.stringify({ query: 'Sony WH-1000XM5', maxBudget: 30000 }),
     });
     expect(res.statusCode).toBe(201);
     const body = JSON.parse(res.body);
@@ -312,10 +313,12 @@ describe('Happy path: RECEIVED → DONE', () => {
       headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
       body: JSON.stringify({
         intentId,
-        merchantName: 'Amazon UK',
-        merchantUrl: 'https://amazon.co.uk/dp/B09XS7JWHH',
+        merchantName: 'Amazon DE',
+        merchantUrl: 'https://amazon.de/dp/B09XS7JWHH',
         price: 27999,
-        currency: 'gbp',
+        // must match the intent's server-derived currency (eur for the Stripe provider),
+        // or /v1/agent/quote rejects the quote with 409 since issue #220
+        currency: 'eur',
       }),
     });
     expect(res.statusCode).toBe(200);
