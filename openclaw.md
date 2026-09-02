@@ -157,9 +157,10 @@ the user a Telegram notification with an approve/reject button.
 ```json
 {
   "intentId": "clxyz123",
-  "merchantName": "Amazon UK",
-  "merchantUrl": "https://www.amazon.co.uk/dp/B0BXYC7KN1",
-  "price": 27999
+  "merchantName": "Amazon DE",
+  "merchantUrl": "https://www.amazon.de/dp/B0BXYC7KN1",
+  "price": 27999,
+  "currency": "eur"
 }
 ```
 
