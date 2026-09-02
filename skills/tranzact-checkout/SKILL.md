@@ -161,7 +161,7 @@ Use your web browsing tools to search for the product the user wants. Collect:
 - **merchantName** — retailer display name (e.g. "Amazon UK")
 - **merchantUrl** — direct product URL (must be a valid URL)
 - **price** — integer in smallest currency unit (e.g. €2.49 = `249`)
-- **currency** — 3-letter ISO code, lowercase (`gbp`, `eur`, `usd`)
+- **currency** — 3-letter ISO code, lowercase (`gbp`, `eur`, `usd`), exactly as shown on the listing. Quotes in a currency other than the intent's are rejected with `409` — find a listing in the intent's currency instead.
 
 **Before asking the user for details**, check `USER.md` for saved preferences (shipping address, email, phone). Only ask for information that isn't already there or that's specific to this purchase (size, colour, etc.). Gather everything you'll need for checkout now — after approval you will yield and resume, so don't interrupt the post-approval flow.
 
@@ -176,7 +176,8 @@ Content-Type: application/json
   "intentId": "<intentId>",
   "merchantName": "Amazon UK",
   "merchantUrl": "https://www.amazon.co.uk/dp/B0BXYC7KN1",
-  "price": 27999
+  "price": 27999,
+  "currency": "gbp"
 }
 ```
 
@@ -186,7 +187,7 @@ Content-Type: application/json
 | `merchantName` | Yes | Retailer display name |
 | `merchantUrl` | Yes | Must be a valid URL |
 | `price` | Yes | Positive integer, smallest currency unit |
-| `currency` | No | No default — omit to inherit the intent's currency from Step 1 (recommended). If passed, it must match the intent's currency (case-insensitive) or the API returns `409`. |
+| `currency` | No | Pass the currency shown on the listing (lowercase ISO). It must match the intent's currency (case-insensitive); a `409` means the listing is in the wrong currency — find a matching listing, do not retry by omitting the field. Omitting inherits the intent's currency and skips this safety check, so omit only when the listing is verifiably in the intent's currency. |
 
 Response (`200`):
 ```json
