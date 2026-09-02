@@ -419,7 +419,7 @@ Report checkout outcome. On success: settle ledger, cancel card, transition to
 |---|---|---|---|
 | `intentId` | string | yes | |
 | `success` | boolean | yes | |
-| `actualAmount` | int ≥ 0 | no | Captured amount in minor units (settled if `success`) |
+| `actualAmount` | int ≥ 0 | on success | Captured amount in minor units (settled if `success`); must not exceed the reserved amount |
 | `receiptUrl` | URL | no | Stored on `intent.metadata` |
 | `errorMessage` | string | no | Stored on `intent.metadata` on failure |
 
@@ -436,6 +436,7 @@ Report checkout outcome. On success: settle ledger, cancel card, transition to
 | 401 | Missing / wrong worker key |
 | 404 | Intent not found |
 | 409 | `Intent must be in CHECKOUT_RUNNING state (current: <status>)` |
+| 422 | `actualAmount` exceeds the reserved amount — over-capture report rejected, intent stays `CHECKOUT_RUNNING` |
 
 ---
 
