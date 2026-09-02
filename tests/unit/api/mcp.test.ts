@@ -56,7 +56,7 @@ jest.mock('@/telegram/notificationService', () => ({
   sendApprovalRequest: jest.fn().mockResolvedValue(undefined),
 }));
 
-const dbPairingCodes: Record<string, any> = {};
+const dbPairingCodes: Record<string, { agentId: string; claimedByUserId: string | null }> = {};
 
 jest.mock('@/db/client', () => ({
   prisma: {
@@ -72,7 +72,7 @@ jest.mock('@/db/client', () => ({
     },
     auditEvent: { create: jest.fn().mockResolvedValue({}) },
     pairingCode: {
-      findUnique: jest.fn(({ where }: any) =>
+      findUnique: jest.fn(({ where }: { where: { agentId: string } }) =>
         Promise.resolve(dbPairingCodes[where.agentId] ?? null),
       ),
       create: jest.fn(),
@@ -82,7 +82,10 @@ jest.mock('@/db/client', () => ({
 }));
 
 import bcrypt from 'bcryptjs';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildApp } from '@/app';
+import { buildMcpServer } from '@/api/mcp/server';
 import { prisma } from '@/db/client';
 import { completeCheckout } from '@/orchestrator/intentService';
 import type { FastifyInstance } from 'fastify';
@@ -187,7 +190,7 @@ describe('tools/list', () => {
     const res = await mcpRequest(rpc('tools/list'));
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const names = body.result.tools.map((t: any) => t.name).sort();
+    const names = body.result.tools.map((t: { name: string }) => t.name).sort();
     expect(names).toEqual([
       'create_intent',
       'get_decision',
@@ -316,25 +319,27 @@ describe('tools/call — review regressions', () => {
 
   it('create_intent forwards a caller-supplied idempotencyKey so retries return the original intent', async () => {
     const rawKey = 'testkey_0123456789abcdef';
-    (prisma.user.findUnique as jest.Mock).mockImplementationOnce(({ where }: any) =>
-      Promise.resolve(
-        where?.apiKeyPrefix === rawKey.slice(0, 16)
-          ? {
-              id: 'user-1',
-              apiKeyPrefix: rawKey.slice(0, 16),
-              apiKeyHash: bcrypt.hashSync(rawKey, 4),
-              paymentProvider: 'STRIPE',
-            }
-          : null,
-      ),
+    (prisma.user.findUnique as jest.Mock).mockImplementationOnce(
+      ({ where }: { where?: { apiKeyPrefix?: string } }) =>
+        Promise.resolve(
+          where?.apiKeyPrefix === rawKey.slice(0, 16)
+            ? {
+                id: 'user-1',
+                apiKeyPrefix: rawKey.slice(0, 16),
+                apiKeyHash: bcrypt.hashSync(rawKey, 4),
+                paymentProvider: 'STRIPE',
+              }
+            : null,
+        ),
     );
     const stored = { intentId: 'intent-original', status: 'SEARCHING' };
     // The forwarded key is namespaced by the bearer's 16-char prefix so two
     // users supplying the same caller key can never replay each other's intent.
-    (prisma.idempotencyRecord.findUnique as jest.Mock).mockImplementationOnce(({ where }: any) =>
-      Promise.resolve(
-        where?.key === 'testkey_01234567:stable-retry-key-1' ? { responseBody: stored } : null,
-      ),
+    (prisma.idempotencyRecord.findUnique as jest.Mock).mockImplementationOnce(
+      ({ where }: { where?: { key?: string } }) =>
+        Promise.resolve(
+          where?.key === 'testkey_01234567:stable-retry-key-1' ? { responseBody: stored } : null,
+        ),
     );
 
     const res = await mcpRequest(
@@ -380,7 +385,7 @@ describe('tools/call — review regressions', () => {
   it('advertised create_intent schema carries the maxBudget ceiling', async () => {
     const res = await mcpRequest(rpc('tools/list'));
     const body = JSON.parse(res.body);
-    const tool = body.result.tools.find((t: any) => t.name === 'create_intent');
+    const tool = body.result.tools.find((t: { name: string }) => t.name === 'create_intent');
     expect(tool.inputSchema.properties.maxBudget.maximum).toBe(1000000);
   });
 
@@ -498,4 +503,37 @@ describe('tools/call — review regressions', () => {
     expect(body2.result.isError).toBe(true);
     expect(body2.result.content[0].text).toContain('Invalid arguments for report_result');
   });
+});
+
+// ─── Long-poll abort on client disconnect ────────────────────────────────────
+
+describe('get_decision long-poll abort', () => {
+  it('stops polling as soon as the client is gone instead of running out the deadline', async () => {
+    (prisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue({
+      id: 'i-gone',
+      status: 'AWAITING_APPROVAL',
+      metadata: {},
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    // pollAbort reports the client as already disconnected.
+    const server = buildMcpServer(app, { clientIp: '10.0.0.9', pollAbort: () => true });
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'abort-test', version: '0.0.1' });
+    await client.connect(clientTransport);
+
+    const started = Date.now();
+    const res = await client.callTool({
+      name: 'get_decision',
+      arguments: { intentId: 'i-gone', waitSeconds: 25 },
+    });
+    const elapsed = Date.now() - started;
+
+    expect(JSON.stringify(res.content)).toContain('AWAITING_APPROVAL');
+    // Without the abort check the loop would keep probing for the full 25 s.
+    expect(elapsed).toBeLessThan(2000);
+
+    await client.close();
+    await server.close();
+    (prisma.purchaseIntent.findUnique as jest.Mock).mockResolvedValue(null);
+  }, 10000);
 });

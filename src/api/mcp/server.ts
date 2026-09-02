@@ -27,6 +27,12 @@ export interface McpRequestContext {
   authorization?: string;
   clientIp?: string;
   agentId?: string;
+  /**
+   * Returns true once the requesting client is gone (socket destroyed). The
+   * get_decision long-poll checks it so an abandoned waitSeconds call stops
+   * probing the database instead of running out its full deadline.
+   */
+  pollAbort?: () => boolean;
 }
 
 interface ApiCallOptions {
@@ -137,6 +143,21 @@ const reportResultArgs = z
       });
     }
   });
+
+/**
+ * Exported for tests only: tests/unit/api/mcpRestDrift.test.ts asserts these
+ * agree with the REST validators they mirror (and pins the deliberate
+ * divergences), so a change to one side without the other fails a test.
+ */
+export const mcpArgSchemas = {
+  registerAgentArgs,
+  getPairingStatusArgs,
+  createIntentArgs,
+  submitQuoteArgs,
+  getDecisionArgs,
+  revealCardArgs,
+  reportResultArgs,
+};
 
 // Tool catalogue — JSON Schemas advertised to MCP clients. Kept literal and in
 // sync with the zod validators above so what is advertised is what is enforced.
@@ -488,9 +509,12 @@ export function buildMcpServer(app: FastifyInstance, ctx: McpRequestContext): Se
         res.body.includes('AWAITING_APPROVAL') &&
         Date.now() < deadline
       ) {
+        // Client disconnected: nobody will receive the result, stop probing.
+        if (ctx.pollAbort?.()) break;
         // Sleep the remaining wait when it is shorter than the poll interval,
         // so waits below 2.5s still get a recheck instead of returning early.
         await sleep(Math.min(DECISION_POLL_INTERVAL_MS, Math.max(deadline - Date.now(), 1)));
+        if (ctx.pollAbort?.()) break;
         const intent = await prisma.purchaseIntent.findUnique({
           where: { id: intentId },
           select: { status: true },

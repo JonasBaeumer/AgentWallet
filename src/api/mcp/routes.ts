@@ -26,6 +26,10 @@ export async function mcpRoutes(fastify: FastifyInstance): Promise<void> {
         authorization: request.headers.authorization,
         clientIp: request.ip,
         agentId: typeof rawAgentId === 'string' && rawAgentId.length > 0 ? rawAgentId : undefined,
+        // Socket state, not the 'close' event: ServerResponse also emits
+        // 'close' after a normal finish, while destroyed only flips on a
+        // genuinely dead connection.
+        pollAbort: () => request.raw.destroyed || reply.raw.destroyed,
       });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
