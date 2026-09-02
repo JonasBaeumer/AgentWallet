@@ -337,7 +337,7 @@ notification to the user.
 | `merchantName` | string | yes | Human-readable merchant name |
 | `merchantUrl` | URL | yes | Product page or merchant URL |
 | `price` | int > 0 | yes | Quoted total in minor units |
-| `currency` | 3-letter ISO code | no | Defaults to `gbp` |
+| `currency` | 3-letter ISO code | no | If supplied, must match the intent's currency (case-insensitive). If omitted, the intent's currency is used. No default. |
 
 **Response 200**
 
@@ -353,6 +353,7 @@ notification to the user.
 | 401 | Missing / wrong worker key |
 | 404 | Intent not found |
 | 409 | `Intent must be in SEARCHING state (current: <status>)` |
+| 409 | `Quote currency "<currency>" does not match intent currency "<currency>"` |
 
 ### `GET /v1/agent/decision/:intentId`
 
