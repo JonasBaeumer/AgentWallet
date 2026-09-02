@@ -130,8 +130,7 @@ Content-Type: application/json
 {
   "query": "Sony WH-1000XM5 headphones, black",
   "subject": "Buy Sony headphones",
-  "maxBudget": 30000,
-  "currency": "eur"
+  "maxBudget": 30000
 }
 ```
 
@@ -140,7 +139,7 @@ Content-Type: application/json
 | `query` | Yes | What to buy (1–500 chars) |
 | `subject` | No | Short label (1–100 chars) |
 | `maxBudget` | Yes | Maximum spend in smallest currency unit. Positive integer, max `1000000` (€10,000). If the user didn't specify a budget, ask them. |
-| `currency` | No | 3-letter ISO code. Defaults to `"eur"`. This becomes the intent's currency — the quote endpoint inherits it automatically. |
+| `currency` | — | Do not send — the server ignores it. The intent's currency is derived from the user's payment provider; the quote endpoint inherits it automatically. |
 
 Response (`201`):
 ```json
@@ -177,8 +176,7 @@ Content-Type: application/json
   "intentId": "<intentId>",
   "merchantName": "Amazon UK",
   "merchantUrl": "https://www.amazon.co.uk/dp/B0BXYC7KN1",
-  "price": 27999,
-  "currency": "gbp"
+  "price": 27999
 }
 ```
 
