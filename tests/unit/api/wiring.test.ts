@@ -144,6 +144,7 @@ const dbIntents: Record<string, any> = {};
 const dbVirtualCards: Record<string, any> = {}; // keyed by intentId
 const dbIdempotency: Record<string, any> = {};
 const dbPairingCodes: Record<string, any> = {}; // keyed by agentId
+const dbPots: Record<string, any> = {}; // keyed by intentId
 
 jest.mock('@/db/client', () => ({
   prisma: {
@@ -188,6 +189,9 @@ jest.mock('@/db/client', () => ({
       }),
     },
     auditEvent: { create: jest.fn().mockResolvedValue({}) },
+    pot: {
+      findUnique: jest.fn(({ where }: any) => Promise.resolve(dbPots[where.intentId] ?? null)),
+    },
     pairingCode: {
       findUnique: jest.fn(({ where }: any) => {
         if (where.agentId) return Promise.resolve(dbPairingCodes[where.agentId] ?? null);
@@ -239,6 +243,7 @@ beforeEach(() => {
   Object.keys(dbVirtualCards).forEach((k) => delete dbVirtualCards[k]);
   Object.keys(dbIdempotency).forEach((k) => delete dbIdempotency[k]);
   Object.keys(dbPairingCodes).forEach((k) => delete dbPairingCodes[k]);
+  Object.keys(dbPots).forEach((k) => delete dbPots[k]);
 });
 
 // ─── POST /v1/webhooks/stripe ─────────────────────────────────────────────────
@@ -750,6 +755,110 @@ describe('POST /v1/agent/result wiring — success', () => {
     });
 
     expect(JSON.parse(res.body).status).toBe(IntentStatus.DONE);
+  });
+});
+
+describe('POST /v1/agent/result wiring — over-capture rejection', () => {
+  function seedRunningIntent(id: string, reservedAmount: number) {
+    dbIntents[id] = { id, userId: 'user-1', status: IntentStatus.CHECKOUT_RUNNING, metadata: {} };
+    dbPots[id] = {
+      id: `pot-${id}`,
+      userId: 'user-1',
+      intentId: id,
+      reservedAmount,
+      settledAmount: 0,
+      status: 'ACTIVE',
+    };
+  }
+
+  it('rejects actualAmount above the reserved amount with 422 and no side effects', async () => {
+    seedRunningIntent('intent-oc1', 10000);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/result',
+      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      body: JSON.stringify({ intentId: 'intent-oc1', success: true, actualAmount: 15000 }),
+    });
+
+    expect(res.statusCode).toBe(422);
+    const body = JSON.parse(res.body);
+    // Error must name both amounts so the worker can correct its report
+    expect(body.error).toContain('15000');
+    expect(body.error).toContain('10000');
+
+    // No state transition, no settlement, no card cancellation, no metadata write
+    expect(mockCompleteCheckout).not.toHaveBeenCalled();
+    expect(mockSettleIntent).not.toHaveBeenCalled();
+    expect(mockFailCheckout).not.toHaveBeenCalled();
+    expect(mockReturnIntent).not.toHaveBeenCalled();
+    expect(mockCancelCard).not.toHaveBeenCalled();
+    expect(dbIntents['intent-oc1'].status).toBe(IntentStatus.CHECKOUT_RUNNING);
+  });
+
+  it('records an audit event for the rejected over-capture report', async () => {
+    seedRunningIntent('intent-oc2', 8000);
+
+    await app.inject({
+      method: 'POST',
+      url: '/v1/agent/result',
+      headers: {
+        'content-type': 'application/json',
+        'x-worker-key': 'test-worker-key',
+        'x-agent-id': 'ag_overcapture',
+      },
+      body: JSON.stringify({ intentId: 'intent-oc2', success: true, actualAmount: 8001 }),
+    });
+
+    const { prisma } = jest.requireMock('@/db/client');
+    expect(prisma.auditEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        intentId: 'intent-oc2',
+        actor: 'ag_overcapture',
+        agentId: 'ag_overcapture',
+        event: 'OVER_CAPTURE_REJECTED',
+        payload: { actualAmount: 8001, reservedAmount: 8000 },
+      }),
+    });
+  });
+
+  it('accepts actualAmount exactly equal to the reserved amount', async () => {
+    seedRunningIntent('intent-oc3', 10000);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/result',
+      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      body: JSON.stringify({ intentId: 'intent-oc3', success: true, actualAmount: 10000 }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockCompleteCheckout).toHaveBeenCalledWith('intent-oc3', 10000, undefined);
+    expect(mockSettleIntent).toHaveBeenCalledWith('intent-oc3', 10000);
+  });
+});
+
+describe('POST /v1/agent/result wiring — success without actualAmount', () => {
+  it('rejects success: true with no actualAmount as 400 and settles nothing', async () => {
+    dbIntents['intent-na1'] = {
+      id: 'intent-na1',
+      userId: 'user-1',
+      status: IntentStatus.CHECKOUT_RUNNING,
+      metadata: {},
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/agent/result',
+      headers: { 'content-type': 'application/json', 'x-worker-key': 'test-worker-key' },
+      body: JSON.stringify({ intentId: 'intent-na1', success: true }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(mockCompleteCheckout).not.toHaveBeenCalled();
+    expect(mockSettleIntent).not.toHaveBeenCalled();
+    expect(mockReturnIntent).not.toHaveBeenCalled();
+    expect(dbIntents['intent-na1'].status).toBe(IntentStatus.CHECKOUT_RUNNING);
   });
 });
 

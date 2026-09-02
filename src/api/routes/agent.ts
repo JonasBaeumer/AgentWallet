@@ -96,8 +96,31 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       if (success) {
-        await completeCheckout(intentId, actualAmount ?? 0, request.agentId);
-        await settleIntent(intentId, actualAmount ?? 0);
+        // agentResultSchema guarantees actualAmount is present when success is true
+        const reportedAmount = actualAmount ?? 0;
+
+        // Over-capture check: the virtual card's network-level spending limit means
+        // it cannot be charged above the reservation, so a report claiming more is
+        // by definition wrong (buggy or malicious worker). Reject it, audit it, and
+        // leave the intent in CHECKOUT_RUNNING so a corrected report can follow.
+        const pot = await prisma.pot.findUnique({ where: { intentId } });
+        if (pot && reportedAmount > pot.reservedAmount) {
+          await prisma.auditEvent.create({
+            data: {
+              intentId,
+              actor: request.agentId ?? 'worker',
+              agentId: request.agentId ?? null,
+              event: 'OVER_CAPTURE_REJECTED',
+              payload: { actualAmount: reportedAmount, reservedAmount: pot.reservedAmount },
+            },
+          });
+          return reply.status(422).send({
+            error: `Reported actualAmount ${reportedAmount} exceeds reserved amount ${pot.reservedAmount} for intent ${intentId} — over-capture reports are rejected`,
+          });
+        }
+
+        await completeCheckout(intentId, reportedAmount, request.agentId);
+        await settleIntent(intentId, reportedAmount);
       } else {
         await failCheckout(intentId, errorMessage ?? 'Checkout failed', request.agentId);
         await returnIntent(intentId);
