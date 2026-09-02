@@ -65,6 +65,19 @@ describe('agentQuoteSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('leaves currency undefined when omitted — no default that could mismatch the intent (issue #220)', () => {
+    const result = agentQuoteSchema.safeParse({
+      intentId: 'i-1',
+      merchantName: 'Amazon UK',
+      merchantUrl: 'https://amazon.co.uk',
+      price: 9999,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.currency).toBeUndefined();
+    }
+  });
 });
 
 describe('agentResultSchema', () => {

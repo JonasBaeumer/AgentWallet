@@ -130,8 +130,7 @@ Content-Type: application/json
 {
   "query": "Sony WH-1000XM5 headphones, black",
   "subject": "Buy Sony headphones",
-  "maxBudget": 30000,
-  "currency": "eur"
+  "maxBudget": 30000
 }
 ```
 
@@ -140,7 +139,7 @@ Content-Type: application/json
 | `query` | Yes | What to buy (1–500 chars) |
 | `subject` | No | Short label (1–100 chars) |
 | `maxBudget` | Yes | Maximum spend in smallest currency unit. Positive integer, max `1000000` (€10,000). If the user didn't specify a budget, ask them. |
-| `currency` | No | 3-letter ISO code. Defaults to `"eur"`. **Always pass explicitly** — the quote endpoint defaults to `"gbp"`, so omitting on both causes a mismatch. |
+| `currency` | — | Do not send — the server ignores it. The intent's currency is derived from the user's payment provider; the quote endpoint inherits it automatically. |
 
 Response (`201`):
 ```json
@@ -162,7 +161,7 @@ Use your web browsing tools to search for the product the user wants. Collect:
 - **merchantName** — retailer display name (e.g. "Amazon UK")
 - **merchantUrl** — direct product URL (must be a valid URL)
 - **price** — integer in smallest currency unit (e.g. €2.49 = `249`)
-- **currency** — 3-letter ISO code, lowercase (`gbp`, `eur`, `usd`)
+- **currency** — 3-letter ISO code, lowercase (`gbp`, `eur`, `usd`), exactly as shown on the listing. Quotes in a currency other than the intent's are rejected with `409` — find a listing in the intent's currency instead.
 
 **Before asking the user for details**, check `USER.md` for saved preferences (shipping address, email, phone). Only ask for information that isn't already there or that's specific to this purchase (size, colour, etc.). Gather everything you'll need for checkout now — after approval you will yield and resume, so don't interrupt the post-approval flow.
 
@@ -188,7 +187,7 @@ Content-Type: application/json
 | `merchantName` | Yes | Retailer display name |
 | `merchantUrl` | Yes | Must be a valid URL |
 | `price` | Yes | Positive integer, smallest currency unit |
-| `currency` | No | Defaults to `"gbp"`. **Always pass explicitly** — must match the currency used in Step 1. |
+| `currency` | No | Pass the currency shown on the listing (lowercase ISO). It must match the intent's currency (case-insensitive); a `409` means the listing is in the wrong currency — find a matching listing, do not retry by omitting the field. Omitting inherits the intent's currency and skips this safety check, so omit only when the listing is verifiably in the intent's currency. |
 
 Response (`200`):
 ```json

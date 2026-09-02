@@ -53,8 +53,22 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
           .send({ error: `Intent must be in SEARCHING state (current: ${intent.status})` });
       }
 
-      // SEARCHING → QUOTED (stores quote data in metadata via orchestrator)
-      await receiveQuote(intentId, { merchantName, merchantUrl, price, currency }, request.agentId);
+      // The intent already knows its currency — an agent-supplied currency that
+      // disagrees would poison the approval message label (issue #220).
+      // Omitted currency inherits intent.currency; supplied currency must match.
+      if (currency !== undefined && currency.toLowerCase() !== intent.currency.toLowerCase()) {
+        return reply.status(409).send({
+          error: `Quote currency "${currency}" does not match intent currency "${intent.currency}"`,
+        });
+      }
+
+      // SEARCHING → QUOTED (stores quote data in metadata via orchestrator).
+      // Always persist the server-side intent currency, never the agent's copy.
+      await receiveQuote(
+        intentId,
+        { merchantName, merchantUrl, price, currency: intent.currency },
+        request.agentId,
+      );
 
       // QUOTED → AWAITING_APPROVAL
       await requestApproval(intentId, request.agentId);

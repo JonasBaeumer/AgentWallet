@@ -220,7 +220,7 @@ Returns an `intentId` that is used in all subsequent calls.
 | `query` | `string` | Yes | Free-text shopping task (e.g. "Sony WH-1000XM5 headphones"), max 500 chars |
 | `subject` | `string` | No | Short task title for notifications, max 100 chars |
 | `maxBudget` | `integer` | Yes | Maximum spend in smallest currency unit (pence/cents), max 1 000 000 |
-| `currency` | `string` | No | 3-letter ISO code, lowercase (e.g. `eur`, `gbp`); default `eur` |
+| `currency` | `string` | — | Ignored — the intent's currency is derived server-side from the user's payment provider (e.g. `eur` for Stripe). |
 | `expiresAt` | `string` | No | ISO 8601 datetime after which the intent expires |
 
 ```json
@@ -228,8 +228,7 @@ Returns an `intentId` that is used in all subsequent calls.
   "userId": "user_abc123",
   "query": "Sony WH-1000XM5 headphones, black",
   "subject": "Buy Sony headphones",
-  "maxBudget": 30000,
-  "currency": "gbp"
+  "maxBudget": 30000
 }
 ```
 
@@ -271,15 +270,15 @@ the user a Telegram notification with an approve/reject button.
 | `merchantName` | `string` | Yes | Non-empty display name of the retailer |
 | `merchantUrl` | `string` | Yes | Direct product URL (valid URL) |
 | `price` | `integer` | Yes | Positive integer, smallest currency unit |
-| `currency` | `string` | No | 3-letter ISO code, lowercase; default `gbp` |
+| `currency` | `string` | No | 3-letter ISO code; pass the currency shown on the listing — it must match the intent's currency (case-insensitive), and a mismatch returns `409` rather than mislabeling the price. Omit to inherit the intent's currency (skips the mismatch check). No default. |
 
 ```json
 {
   "intentId": "clxyz123",
-  "merchantName": "Amazon UK",
-  "merchantUrl": "https://www.amazon.co.uk/dp/B0BXYC7KN1",
+  "merchantName": "Amazon DE",
+  "merchantUrl": "https://www.amazon.de/dp/B0BXYC7KN1",
   "price": 27999,
-  "currency": "gbp"
+  "currency": "eur"
 }
 ```
 
@@ -297,6 +296,7 @@ the user a Telegram notification with an approve/reject button.
 | `401` | Missing or wrong `X-Worker-Key` |
 | `404` | `intentId` not found |
 | `409` | Intent is not in `SEARCHING` state |
+| `409` | `currency` does not match the intent's currency |
 
 Do not post another quote for the same `intentId`. The user is now deciding.
 
@@ -336,7 +336,7 @@ Stop polling. Do not attempt checkout.
   "checkout": {
     "intentId": "clxyz123",
     "amount": 27999,
-    "currency": "gbp"
+    "currency": "eur"
   }
 }
 ```

@@ -20,7 +20,9 @@ export async function sendApprovalRequest(intentId: string): Promise<void> {
   const metadata = intent.metadata as Record<string, unknown>;
   const merchantName = (metadata.merchantName as string) ?? 'Unknown merchant';
   const price = (metadata.price as number) ?? intent.maxBudget;
-  const currency = ((metadata.currency as string) ?? intent.currency).toUpperCase();
+  // Consent screen must be server-authored: label from intent.currency only,
+  // never from agent-supplied metadata.currency (issue #220).
+  const currency = intent.currency.toUpperCase();
   const taskTitle = intent.subject ?? intent.query;
 
   const text =
